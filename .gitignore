@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+dist-electron/
+build/
+release/
+*.tsbuildinfo
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Local app data (dev convenience copies only; real data lives in %APPDATA%)
+*.db
+*.sqlite
+*.sqlite3
+vault.key
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Test artifacts
+coverage/
+screenshots/
+videos/
+traces/
+playwright-report/
+test-results/
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Electron-builder
+*.exe
+*.blockmap

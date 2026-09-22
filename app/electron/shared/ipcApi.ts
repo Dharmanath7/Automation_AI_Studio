@@ -8,7 +8,8 @@ import type { Project, CreateProjectInput } from "../services/projectService";
 import type { Environment, CreateEnvironmentInput } from "../services/environmentService";
 import type { CredentialProfile, CredentialFieldSummary } from "../services/credentialService";
 import type { TestCase, CreateTestCaseInput } from "../services/testCaseService";
-import type { TestModel } from "./testModel";
+import type { TestModel, TestStep } from "./testModel";
+import type { RecorderEvent } from "../services/recorder/recorderService";
 import type { WriteOutcome, AutomationMapping } from "../services/codegen/generationService";
 import type { RunRequest, ExecutionSummary, ExecutionDetail } from "../services/execution/executionService";
 import type { ExecutionEvent, RuntimeCheckResult } from "../services/execution/ExecutionAdapter";
@@ -89,6 +90,11 @@ export interface StudioApi {
   };
   dialog: {
     selectDirectory(): Promise<Envelope<{ path: string | null }>>;
+  };
+  recorder: {
+    start(baseUrl: string, browser: "chrome" | "chromium"): Promise<Envelope<{ recordingId: string }>>;
+    stop(recordingId: string): Promise<Envelope<{ steps: TestStep[] }>>;
+    onEvent(cb: (event: RecorderEvent) => void): () => void;
   };
 }
 

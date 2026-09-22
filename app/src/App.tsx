@@ -7,6 +7,7 @@ import ProjectsPage from "@/pages/ProjectsPage";
 import ProjectDetailPage from "@/pages/ProjectDetailPage";
 import TestsPage from "@/pages/TestsPage";
 import TestEditorPage from "@/pages/TestEditorPage";
+import RecorderPage from "@/pages/RecorderPage";
 import ExecutionPage from "@/pages/ExecutionPage";
 import ReportsPage from "@/pages/ReportsPage";
 import RuntimePage from "@/pages/RuntimePage";
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="/tests" element={<TestsPage />} />
           <Route path="/tests/:testCaseId" element={<TestEditorPage />} />
+          <Route path="/record" element={<RecorderPage />} />
           <Route path="/execution" element={<ExecutionPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/:executionId" element={<ReportsPage />} />

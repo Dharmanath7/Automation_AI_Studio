@@ -20,7 +20,7 @@ export default defineConfig({
           build: {
             outDir: "dist-electron",
             rollupOptions: {
-              external: ["sql.js", "argon2", "pino", "pino/file"],
+              external: ["sql.js", "argon2", "pino", "pino/file", "playwright"],
             },
           },
         },

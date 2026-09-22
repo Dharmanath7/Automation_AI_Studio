@@ -86,15 +86,18 @@ the applications being tested (TST Admin, API Service Account, etc.), stored per
 
 ## 4. Password-field detection during recording
 
-When the recorder observes `document.activeElement.type === "password"` (or the
-element's computed accessibility role plus `type=password`) at the moment a fill
-action is captured, it does **not** record the keystroke value at all — it prompts
-the user to map the field to a Credential Vault entry (defaulting to
-`credentials.default.password` if a default profile is set for the environment) and
-stores only that variable reference in the Test Model. This is enforced in the
-recorder controller, not left to a later "don't save literal passwords" filter,
-because the raw value should ideally never even transit into the recorder's step
-buffer.
+When the recorder's injected page script observes `type === "password"` on the
+changed field, it does **not** read or send the field's value at all — see
+`electron/services/recorder/pageScript.ts` and `recorderService.ts`. The main
+process converts that event directly into
+`{ kind: "variable", path: "credentials.default.password" }` in the Test Model,
+with a note flagging it for the user to point at the right profile if the
+project uses more than one. This is enforced client-side at the point of
+capture, not by a later "don't save literal passwords" filter — the raw
+keystroke value never leaves the recorded page's own JS realm, let alone
+reaches the Studio's process or database. (Mapping to a *non-default*
+credential profile by name is a manual edit in the review step today — see
+`ROADMAP.md`.)
 
 ## 5. Input validation / command construction safety
 

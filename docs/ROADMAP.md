@@ -23,19 +23,22 @@ not a partial UI wired to fake data.
 - [x] `PythonExecutionAdapter`: spawns pytest, parses JSON report, captures
       failure screenshots
 - [x] Execution history + basic reporting dashboard, failure detail view
-- [ ] Browser recorder (live click/fill/navigate capture) — **scoped down for
-      this build**: the recorder controller and IPC plumbing exist and the visual
-      editor already produces the same Test Model a recorder would, but the
-      Playwright-driven live capture loop is marked "Coming Soon" in the UI pending
-      a follow-up session, per the product brief's rule against faking working
-      features (§54.2–3). Architecture for it is defined in `ARCHITECTURE.md` §8.2.
+- [x] Browser recorder: launches a real Chrome window (via Playwright, `channel:
+      "chrome"` — no separate browser download required), captures click/
+      doubleClick/fill/select/check/uncheck/navigate live via an injected page
+      script + `exposeBinding`, computes a best-effort locator per interaction
+      (testId > aria-label/label > placeholder > role+text > css), and masks
+      password fields at the point of capture — their value is never read out of
+      the page, only stored as a `credentials.default.password` reference. See
+      `electron/services/recorder/`. Captured steps land in the same visual
+      editor (`src/components/StepEditor.tsx`) used for manual test building, so
+      marking any recorded field as random/boundary data is the same UI as
+      editing any other step.
 - [ ] Windows `.exe` packaging via electron-builder (config present; full signed
       build deferred)
 
-Definition of Done for Phase 1 is the 35-step scenario in the original brief; the
-recorder step (12–14) is the one gap against that scenario today — everything else
-in the scenario is real and runnable end-to-end via the manual test builder in place
-of live recording.
+Definition of Done for Phase 1 is the 35-step scenario in the original brief;
+every step is now real and runnable end-to-end, including live recording.
 
 ## Phase 2
 Reusable flows UI, advanced reports, automation coverage %, trace viewer, video

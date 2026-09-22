@@ -17,6 +17,7 @@ import { PlaywrightPythonPytestGenerator } from "../services/codegen/adapters/Pl
 import { writeGeneratedCode, getAutomationMapping, readProjectFile } from "../services/codegen/generationService";
 import { runExecution, listExecutions, getExecution } from "../services/execution/executionService";
 import { checkAndCacheRuntime, getLastRuntimeCheck } from "../services/runtimeService";
+import { startRecording, stopRecording } from "../services/recorder/recorderService";
 import { getLogger } from "../services/logger";
 import type { TestModel } from "../shared/testModel";
 import * as schemas from "./schemas";
@@ -185,6 +186,20 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   handleAuthed("frameworks:list", schemas.frameworksListSchema, () =>
     getDb().prepare("SELECT * FROM framework_configs ORDER BY language, framework").all()
   );
+
+  // ---- Browser recorder ----------------------------------------------------
+  handleAuthed("recorder:start", schemas.recorderStartSchema, async ({ baseUrl, browser }) => {
+    const recordingId = await startRecording({
+      baseUrl,
+      browser,
+      onEvent: (event) => mainWindow.webContents.send("recorder:event", event),
+    });
+    return { recordingId };
+  });
+  handleAuthed("recorder:stop", schemas.recorderStopSchema, async ({ recordingId }) => {
+    const steps = await stopRecording(recordingId);
+    return { steps };
+  });
 
   // ---- Native dialogs ---------------------------------------------------
   handleAuthed("dialog:selectDirectory", schemas.authMeSchema, async () => {

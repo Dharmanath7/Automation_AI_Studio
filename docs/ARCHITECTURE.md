@@ -146,13 +146,17 @@ the installer.
    Node version (`electron-rebuild` / `@electron/rebuild`) after every Electron
    version bump. Mitigated by pinning versions and running the rebuild step as part of
    `npm install` (`postinstall`).
-2. **In-app recorder complexity** — driving a real, visible browser from the Electron
-   main process, capturing user-performed actions as structured steps (not just a
-   Playwright-generated script), and reconciling password-field masking, requires
-   injecting a recorder script into the target page and streaming events back over
-   Playwright's `exposeFunction`. This is scoped as its own vertical slice; see
-   `ROADMAP.md` for its phased delivery (basic click/fill/navigate capture first,
-   richer gestures — drag/drop, uploads, new-tab handling — after).
+2. **In-app recorder complexity** — resolved for the core gesture set. The
+   recorder (`electron/services/recorder/`) drives a real Chrome window via
+   Playwright's `channel: "chrome"` (the system-installed browser, not a
+   separate downloaded binary), injects a page script via
+   `BrowserContext.addInitScript` that computes a locator client-side and
+   reports each interaction through `exposeBinding`, and masks password-field
+   values at the point of capture rather than after the fact. Verified against
+   a real page over CDP: click/fill/navigate capture correctly, and a
+   password field never has its value read out of the page. Richer gestures
+   (drag/drop, uploads, new-tab handling) remain future work — see
+   `ROADMAP.md`.
 3. **Locator quality without a live DOM at generation time** — the model stores the
    full candidate locator set (role, name, testid, css) captured at record time so the
    generator can pick the best one and the Element Inspector can show alternatives,

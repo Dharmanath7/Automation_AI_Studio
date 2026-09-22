@@ -70,6 +70,15 @@ const api: StudioApi = {
   dialog: {
     selectDirectory: () => invoke("dialog:selectDirectory"),
   },
+  recorder: {
+    start: (baseUrl, browser) => invoke("recorder:start", { baseUrl, browser }),
+    stop: (recordingId) => invoke("recorder:stop", { recordingId }),
+    onEvent: (cb) => {
+      const listener = (_evt: unknown, event: unknown) => cb(event as never);
+      ipcRenderer.on("recorder:event", listener);
+      return () => ipcRenderer.removeListener("recorder:event", listener);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld("studio", api);

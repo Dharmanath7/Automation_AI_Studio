@@ -42,7 +42,7 @@ export default function AppShell() {
 
         <div className="group-title">Create</div>
         <NavLink to="/tests?new=1">Build Test Manually</NavLink>
-        <SoonItem label="Record Browser" />
+        <NavLink to="/record">Record Browser</NavLink>
         <SoonItem label="AI Test Builder" />
         <SoonItem label="Screenshot Lab" />
 

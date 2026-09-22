@@ -47,6 +47,13 @@ function alphanumeric(length: number): string {
   return s;
 }
 
+function lowercaseLetters(length: number): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz";
+  let s = "";
+  for (let i = 0; i < length; i++) s += chars[randomInt(0, chars.length - 1)];
+  return s;
+}
+
 function isoDate(offsetDays: number): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
@@ -65,7 +72,12 @@ export function generateRandomValue(generator: RandomGenerator, pattern?: string
     case "integer": return String(randomInt(0, 1_000_000));
     case "decimal": return (Math.random() * 10_000).toFixed(2);
     case "alphanumeric": return alphanumeric(10);
-    case "randomString": return alphanumeric(12);
+    // Deliberately garbage-looking (lowercase letters + trailing digits,
+    // e.g. "ihabscjhbajchs8812") rather than mixed-case — this is the
+    // default generator for "Random", and junk data that obviously isn't a
+    // real value is exactly the point, as opposed to something that could
+    // be mistaken for genuine (if fake) input.
+    case "randomString": return `${lowercaseLetters(randomInt(8, 14))}${randomDigits(randomInt(2, 4))}`;
     case "date": return isoDate(0);
     case "pastDate": return isoDate(-randomInt(1, 365));
     case "futureDate": return isoDate(randomInt(1, 365));

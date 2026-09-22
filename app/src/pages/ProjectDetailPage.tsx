@@ -138,6 +138,7 @@ function CredentialsSection({ projectId }: { projectId: string }) {
   const [newProfileName, setNewProfileName] = useState("");
   const [fieldKey, setFieldKey] = useState("username");
   const [fieldValue, setFieldValue] = useState("");
+  const [showValue, setShowValue] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refreshProfiles() {
@@ -274,14 +275,20 @@ function CredentialsSection({ projectId }: { projectId: string }) {
                 </div>
                 <div className="mini-field">
                   <span className="mini-label">Value</span>
-                  <input
-                    aria-label="Credential value"
-                    type="password"
-                    value={fieldValue}
-                    onChange={(e) => setFieldValue(e.target.value)}
-                    placeholder="Value"
-                    required
-                  />
+                  <div className="row" style={{ gap: 6 }}>
+                    <input
+                      aria-label="Credential value"
+                      type={showValue ? "text" : "password"}
+                      autoComplete="off"
+                      value={fieldValue}
+                      onChange={(e) => setFieldValue(e.target.value)}
+                      placeholder="Value"
+                      required
+                    />
+                    <button type="button" className="ghost" onClick={() => setShowValue((v) => !v)} title={showValue ? "Hide value" : "Show value"}>
+                      {showValue ? "Hide" : "Show"}
+                    </button>
+                  </div>
                 </div>
                 <button type="submit" className="primary">
                   Save

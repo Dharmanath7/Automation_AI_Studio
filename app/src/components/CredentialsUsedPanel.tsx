@@ -121,6 +121,7 @@ function CredentialRefRow({
   const [pickProfileId, setPickProfileId] = useState("");
   const [newProfileName, setNewProfileName] = useState("TST Admin");
   const [fieldValue, setFieldValue] = useState("");
+  const [showValue, setShowValue] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -224,12 +225,18 @@ function CredentialRefRow({
       </div>
       <div className="row wrap">
         <input
-          type={isSecretField ? "password" : "text"}
+          type={isSecretField && !showValue ? "password" : "text"}
+          autoComplete="off"
           placeholder={existing ? "New value (leave blank to keep current)" : `Value for "${ref_.field}"`}
           value={fieldValue}
           onChange={(e) => setFieldValue(e.target.value)}
           style={{ maxWidth: 260 }}
         />
+        {isSecretField && (
+          <button type="button" className="ghost" onClick={() => setShowValue((v) => !v)} title={showValue ? "Hide value" : "Show value"}>
+            {showValue ? "Hide" : "Show"}
+          </button>
+        )}
         <button
           className="primary"
           disabled={busy || !fieldValue}

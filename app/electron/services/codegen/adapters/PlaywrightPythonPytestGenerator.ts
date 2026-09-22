@@ -403,10 +403,31 @@ def env():
     }
 
 
+class _CredsDict(dict):
+    """A dict that raises an actionable error instead of a bare KeyError.
+
+    creds["default"]["password"] on an environment with no Credential Vault
+    profile linked raises "KeyError: 'default'" with no indication of what
+    to actually do about it — a very easy way for "most tests keep failing"
+    to happen invisibly, especially for a recorded login (which references
+    credentials.default.password automatically). This turns that into a
+    message pointing at the exact fix.
+    """
+
+    def __missing__(self, key):
+        raise KeyError(
+            f"No Credential Vault value is set for '{key}' in this environment. "
+            f"In Automation AI Studio, open this test (or the environment's "
+            f"Environments & Credentials page) and set/link a credential profile "
+            f"for '{key}' before running — see the 'Credentials Used' panel."
+        )
+
+
 @pytest.fixture(scope="session")
 def creds():
     raw = os.environ.pop("AAS_CREDENTIALS_JSON", "{}")
-    return json.loads(raw)
+    data = json.loads(raw)
+    return _CredsDict({profile: _CredsDict(fields) for profile, fields in data.items()})
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -519,7 +540,11 @@ def alphanumeric(length: int = 10) -> str:
 
 
 def random_string() -> str:
-    return alphanumeric(12)
+    # Deliberately garbage-looking (lowercase letters + trailing digits) so
+    # it's never mistaken for a real value — mirrors electron/shared/randomData.ts.
+    letters = "".join(random.choices(string.ascii_lowercase, k=random.randint(8, 14)))
+    digits = "".join(random.choices(string.digits, k=random.randint(2, 4)))
+    return f"{letters}{digits}"
 
 
 def date_() -> str:

@@ -46,10 +46,22 @@ async function createMainWindow(): Promise<void> {
 
   if (VITE_DEV_SERVER_URL) {
     await mainWindow.loadURL(VITE_DEV_SERVER_URL);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    // DevTools no longer auto-opens on every launch — set AAS_OPEN_DEVTOOLS=1
+    // to get it back, or open it on demand with Ctrl+Shift+I / F12 (both
+    // registered below).
+    if (process.env.AAS_OPEN_DEVTOOLS === "1") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     await mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
+
+  mainWindow.webContents.on("before-input-event", (_event, input) => {
+    const isToggleCombo = input.key === "F12" || ((input.control || input.meta) && input.shift && input.key.toUpperCase() === "I");
+    if (isToggleCombo && input.type === "keyDown") {
+      mainWindow?.webContents.toggleDevTools();
+    }
+  });
 
   mainWindow.on("closed", () => {
     mainWindow = null;

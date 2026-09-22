@@ -146,6 +146,40 @@ racing them, in three layers:
    though it would have passed a moment later. Verified with a real page
    that delays its content by 7 seconds against the default 30s budget.
 
+## Diagnosing "the test keeps failing"
+
+Two failure modes look like flakiness or a broken locator but are actually
+configuration gaps — both were found by running a realistically-named test
+("Health Plan Create DEMO1") end to end and reading the actual pytest output,
+not by guessing from the symptom description:
+
+1. **No Credential Vault profile linked to the environment.** A step that
+   fills a password field always references `credentials.default.password`
+   (the recorder writes this automatically — see docs/SECURITY.md §4). If the
+   environment has no default credential profile actually linked, the
+   generated code's `creds["default"]["password"]` raised a bare
+   `KeyError: 'default'` — not obviously about credentials at all. The
+   generated `creds` fixture now returns a dict subclass whose
+   `__missing__` raises an error that names the exact fix ("set/link a
+   credential profile for 'default' ... see the 'Credentials Used' panel")
+   instead of a bare KeyError.
+2. **Garbled identifiers from an all-caps word in the test name.**
+   `toSnakeCase()` used to split before *every* uppercase letter, so a name
+   like "Health Plan Create DEMO1" produced
+   `health_plan_create_d_e_m_o1_page` — cosmetically broken but, more
+   importantly, a strong signal something is off in generation worth
+   distrusting. Fixed to treat a run of uppercase letters as one word (the
+   standard camelCase/acronym-aware split) — see
+   `electron/services/codegen/pythonSyntax.ts`.
+
+Also: none of the string-content generator tests (`toContain`/`toMatch`)
+would have caught a *syntactically invalid* Python file — and one shipped
+undetected this way (a literal `"..."` inside an already double-quoted
+f-string in the `creds` fixture's error message). `tests/unit/
+generatedPythonSyntax.test.ts` now compiles every generated file with the
+real Python interpreter (`python -m py_compile`), not just its string
+content.
+
 ## Tab switching
 
 A click that opens a new browser tab (`target="_blank"`, `window.open`,

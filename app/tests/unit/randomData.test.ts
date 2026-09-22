@@ -12,6 +12,15 @@ describe("randomData", () => {
     expect(value).toMatch(/^[a-z]+\.[a-z0-9]+@example\.com$/);
   });
 
+  it("generates a garbage-looking string (lowercase letters + trailing digits), not a realistic word", () => {
+    // Regression: "randomString" is the default generator when a field is
+    // marked Random — it should read as obvious junk data (matching the
+    // style of a real generated value, e.g. "ihabscjhbajchs8812"), not
+    // something that could pass for a genuine value.
+    const value = generateRandomValue("randomString");
+    expect(value).toMatch(/^[a-z]{8,14}[0-9]{2,4}$/);
+  });
+
   describe("generateBoundaryValue", () => {
     it("returns an empty string for the empty boundary", () => {
       expect(generateBoundaryValue("empty")).toBe("");

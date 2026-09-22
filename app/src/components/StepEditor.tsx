@@ -245,7 +245,11 @@ export function ValueEditor({
             const newKind = e.target.value as TestValue["kind"];
             if (newKind === "literal") onChange({ kind: "literal", value: "" });
             else if (newKind === "variable") onChange({ kind: "variable", path: "base_url" });
-            else if (newKind === "random") onChange({ kind: "random", generator: "fullName", seedOnce: true });
+            // Default to a garbage-looking string, not a realistic name —
+            // most fields aren't a name field, and "James Smith" showing up
+            // for an arbitrary text box reads as a real (if fake) person
+            // more than obviously-generated test data does.
+            else if (newKind === "random") onChange({ kind: "random", generator: "randomString", seedOnce: true });
             else onChange({ kind: "boundary", boundary: "empty" });
           }}
         >

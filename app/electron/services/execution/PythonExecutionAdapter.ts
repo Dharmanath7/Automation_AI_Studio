@@ -131,6 +131,13 @@ export const PythonExecutionAdapter: ExecutionAdapter = {
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
+      // Without this, Python defaults piped (non-console) stdout/stderr to
+      // the OS codepage rather than UTF-8 on Windows — any non-ASCII
+      // character written by pytest or a fixture (e.g. an em dash in an
+      // error message) comes back through our stdout capture as a mangled
+      // "�" instead of the real character. Caught in a real error message,
+      // not by inspection.
+      PYTHONIOENCODING: "utf-8",
       BASE_URL: request.env.base_url ?? "",
       API_URL: request.env.api_url ?? "",
       BROWSER: request.browser,

@@ -81,16 +81,103 @@ describe("PlaywrightPythonPytestGenerator", () => {
     expect(paths).toContain("pytest.ini");
   });
 
-  it("never lets a method name collide with a locator attribute name (regression: 'Login' button + login() method)", () => {
-    // Both the "Login" button's locator attribute and the login-flow method
-    // name derive from the word "login". If they ever collide, the instance
-    // attribute set in __init__ silently shadows the method and calling it
-    // raises "'Locator' object is not callable" at runtime — caught via a
-    // real `pytest` run against generated output, not just static review.
+  it("never lets a flow method collide with a locator property name (regression: 'Login' button + login() method)", () => {
+    // Both the "Login" button's locator property and the login-flow method
+    // name derive from the word "login". If they ever collided under the
+    // old __init__-attribute-binding design, the instance attribute set in
+    // __init__ would silently shadow the method and calling it would raise
+    // "'Locator' object is not callable" at runtime — caught via a real
+    // `pytest` run against generated output, not just static review.
+    // Locators are now @property methods (see the tab-switch note below),
+    // which sidesteps that specific failure mode, but the flow method must
+    // still be named distinctly from the locator property.
     const page = result.pageObjectFiles[0].content;
-    expect(page).toContain("self.login = page.get_by_role");
-    expect(page).not.toMatch(/def login\(/);
+    expect(page).toContain("def login(self) -> Locator:");
+    expect(page).not.toMatch(/def login\(self, env/);
     expect(page).toMatch(/def login_flow\(/);
     expect(result.testFile.content).toContain("search_provider_page.login_flow(env, creds)");
+  });
+});
+
+describe("PlaywrightPythonPytestGenerator — smart waits", () => {
+  const ctx = { projectDirectory: "C:/proj", projectCode: "PROJ", existingPageObjectNames: [] };
+
+  it("waits for load state after a click, in case it triggered a navigation", () => {
+    const clickModel: TestModel = {
+      schemaVersion: 1,
+      testCaseId: "tc-2",
+      projectId: "proj-1",
+      name: "Click Through",
+      tags: [],
+      steps: [
+        {
+          id: "c1",
+          type: "click",
+          target: { preferred: { strategy: "role", value: "link", roleName: "Provider Search", quality: "excellent" }, alternatives: [] },
+          enabled: true,
+        },
+      ],
+    };
+    const result = PlaywrightPythonPytestGenerator.generate(clickModel, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toMatch(/\.click\(\)\s*\n\s*self\.page\.wait_for_load_state\("domcontentloaded"\)/);
+  });
+
+  it("wires the environment's configurable timeout into both action and assertion (expect) waits", () => {
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const conftest = result.supportFiles.find((f) => f.relativePath === "conftest.py")!.content;
+    expect(conftest).toContain('int(os.environ.get("TIMEOUT_MS", "30000"))');
+    expect(conftest).toContain("expect.set_options(timeout=env[\"timeout_ms\"])");
+    expect(conftest).toContain('context.set_default_timeout(env["timeout_ms"])');
+  });
+});
+
+describe("PlaywrightPythonPytestGenerator — tab switching", () => {
+  const ctx = { projectDirectory: "C:/proj", projectCode: "PROJ", existingPageObjectNames: [] };
+
+  // Mirrors exactly what the recorder emits when a click opens a new
+  // browser tab — see electron/services/recorder/recorderService.ts, which
+  // records a "newTab" step immediately after the triggering click.
+  const tabModel: TestModel = {
+    schemaVersion: 1,
+    testCaseId: "tc-3",
+    projectId: "proj-1",
+    name: "Open External Link",
+    tags: [],
+    steps: [
+      {
+        id: "t1",
+        type: "click",
+        target: { preferred: { strategy: "role", value: "link", roleName: "View Details", quality: "excellent" }, alternatives: [] },
+        enabled: true,
+      },
+      { id: "t2", type: "newTab", enabled: true },
+      {
+        id: "t3",
+        type: "assert",
+        target: { preferred: { strategy: "text", value: "Details Page", quality: "good" }, alternatives: [] },
+        assertion: { type: "visible" },
+        enabled: true,
+      },
+    ],
+  };
+
+  it("wraps the tab-opening click in context.expect_page() and reassigns self.page", () => {
+    const result = PlaywrightPythonPytestGenerator.generate(tabModel, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toContain("with self.page.context.expect_page() as new_page_info:");
+    expect(page).toContain("self.page = new_page_info.value");
+    // The newTab step itself must not generate a separate/duplicate statement.
+    expect(page).not.toMatch(/TODO.*newTab/);
+  });
+
+  it("generates locators as @property methods (not __init__ attributes) so they resolve against the current self.page after a tab switch", () => {
+    const result = PlaywrightPythonPytestGenerator.generate(tabModel, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toMatch(/@property\s*\n\s*def view_details\(self\) -> Locator:\s*\n\s*return self\.page\.get_by_role/);
+    // The old design bound locators once in __init__ against whatever page
+    // was passed at construction time; that would silently keep querying
+    // the pre-tab-switch page instead of the new tab.
+    expect(page).not.toContain("self.view_details = ");
   });
 });

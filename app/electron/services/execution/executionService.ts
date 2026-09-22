@@ -66,7 +66,12 @@ export async function runExecution(
       {
         projectDirectory: project.projectDirectory,
         testFilePaths: filePaths,
-        env: { base_url: environment.baseUrl, api_url: environment.apiUrl ?? "", ...environment.customVariables },
+        env: {
+          base_url: environment.baseUrl,
+          api_url: environment.apiUrl ?? "",
+          timeout_ms: String(environment.timeoutMs),
+          ...environment.customVariables,
+        },
         credentials,
         browser: request.browser,
         mode: request.mode,
@@ -190,7 +195,7 @@ export interface ExecutionDetail extends ExecutionSummary {
     durationMs: number;
     errorMessage: string | null;
     failureClassification: string | null;
-    artifacts: { kind: string; filePath: string }[];
+    artifacts: { id: string; kind: string; filePath: string }[];
   }[];
 }
 
@@ -211,7 +216,8 @@ export function getExecution(db: SqlJsDatabase, executionId: string): ExecutionD
     durationMs: t.duration_ms,
     errorMessage: t.error_message,
     failureClassification: t.failure_classification,
-    artifacts: (db.prepare("SELECT kind, file_path FROM artifacts WHERE execution_test_id = ?").all(t.id) as any[]).map((a) => ({
+    artifacts: (db.prepare("SELECT id, kind, file_path FROM artifacts WHERE execution_test_id = ?").all(t.id) as any[]).map((a) => ({
+      id: a.id,
       kind: a.kind,
       filePath: a.file_path,
     })),

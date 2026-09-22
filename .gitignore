@@ -5,9 +5,10 @@ node_modules/
 # Build output
 dist/
 dist-electron/
-build/
 release/
 *.tsbuildinfo
+# NOTE: app/build/ is NOT ignored — electron-builder convention uses it for
+# committed source assets (app icons), not build output.
 
 # Env / secrets
 .env

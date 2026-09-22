@@ -33,6 +33,7 @@ async function createMainWindow(): Promise<void> {
     minWidth: 1024,
     minHeight: 700,
     title: "Automation AI Studio",
+    icon: path.join(__dirname, "../build/icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -56,19 +57,29 @@ async function createMainWindow(): Promise<void> {
 }
 
 app.whenReady().then(async () => {
+  await initializeDatabase();
+  const db = getDb();
+  await ensureBootstrapAdmin(db);
+
   const artifactsRoot = path.join(app.getPath("userData"), "artifacts");
   protocol.handle("aas-artifact", (request) => {
-    const encoded = request.url.replace(/^aas-artifact:\/\/\/?/, "");
-    const filePath = path.resolve(decodeURIComponent(encoded));
+    // Looked up by artifact row id (a UUID — always URL-safe), not by
+    // encoding the actual Windows file path into the URL: a raw path with a
+    // drive letter and backslashes (C%3A%5CUsers%5C...) round-trips through
+    // Chromium's URL parser unreliably for a "standard" custom scheme,
+    // which is what made screenshots render broken.
+    const artifactId = request.url.replace(/^aas-artifact:\/\//, "").replace(/\/+$/, "");
+    const row = getDb().prepare("SELECT file_path FROM artifacts WHERE id = ?").get(artifactId) as
+      | { file_path: string }
+      | undefined;
+    if (!row) return new Response("Not found", { status: 404 });
+    const filePath = path.resolve(row.file_path);
     if (!filePath.startsWith(artifactsRoot)) {
       return new Response("Forbidden", { status: 403 });
     }
     return net.fetch(pathToFileURL(filePath).toString());
   });
 
-  await initializeDatabase();
-  const db = getDb();
-  await ensureBootstrapAdmin(db);
   logger.info("Automation AI Studio starting up");
   await createMainWindow();
 

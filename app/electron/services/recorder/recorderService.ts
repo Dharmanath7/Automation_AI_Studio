@@ -1,4 +1,4 @@
-import { chromium, type Browser, type BrowserContext } from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { v4 as uuidv4 } from "uuid";
 import type { TestStep, LocatorCandidate, LocatorQuality, LocatorStrategy } from "../../shared/testModel";
 import { RECORDER_INIT_SCRIPT } from "./pageScript";
@@ -121,15 +121,39 @@ export async function startRecording(opts: StartRecordingOptions): Promise<strin
   });
   await context.addInitScript(RECORDER_INIT_SCRIPT);
 
-  const page = await context.newPage();
+  // Tracks top-level navigation on one page as "navigate" steps. `skipFirst`
+  // is used for a newly opened tab: its first "navigation" is just the
+  // browser following the link that opened it (already implied by the
+  // newTab step + the generated context.expect_page() wrapper around the
+  // triggering click — see PlaywrightPythonPytestGenerator.ts), not a
+  // separate action to record.
+  function attachNavigationTracking(target: Page, skipFirst: boolean) {
+    let lastUrl: string | null = null;
+    let firstSkipped = !skipFirst;
+    target.on("framenavigated", (frame) => {
+      if (frame !== target.mainFrame()) return;
+      const url = frame.url();
+      if (url === "about:blank" || url === lastUrl) return;
+      lastUrl = url;
+      if (!firstSkipped) {
+        firstSkipped = true;
+        return;
+      }
+      pushStep({ id: uuidv4(), type: "navigate", value: { kind: "literal", value: url }, enabled: true });
+    });
+  }
 
-  let lastUrl: string | null = null;
-  page.on("framenavigated", (frame) => {
-    if (frame !== page.mainFrame()) return;
-    const url = frame.url();
-    if (url === "about:blank" || url === lastUrl) return;
-    lastUrl = url;
-    pushStep({ id: uuidv4(), type: "navigate", value: { kind: "literal", value: url }, enabled: true });
+  const page = await context.newPage();
+  attachNavigationTracking(page, false);
+
+  // A click/tap that opens a link in a new tab (target="_blank", ctrl-click,
+  // window.open, ...) creates a new Page on the context. Record it as a
+  // "newTab" step — the code generator absorbs it into the click
+  // immediately before it — and keep tracking navigation on the new tab too,
+  // since it's now where the user's subsequent actions will happen.
+  context.on("page", (newPage) => {
+    pushStep({ id: uuidv4(), type: "newTab", enabled: true });
+    attachNavigationTracking(newPage, true);
   });
 
   browser.on("disconnected", () => {

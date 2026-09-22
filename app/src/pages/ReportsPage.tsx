@@ -3,8 +3,11 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useProjectStore } from "@/state/projectStore";
 import type { ExecutionSummary, ExecutionDetail } from "@shared/ipcApi";
 
-function artifactUrl(absolutePath: string): string {
-  return `aas-artifact:///${encodeURIComponent(absolutePath)}`;
+// Looked up by artifact row id (server-resolved to the real file path in
+// main.ts) rather than encoding the Windows file path into the URL — see
+// the comment in electron/main.ts's aas-artifact protocol handler.
+function artifactUrl(artifactId: string): string {
+  return `aas-artifact://${artifactId}`;
 }
 
 export default function ReportsPage() {
@@ -140,11 +143,11 @@ function ExecutionDetailView({ executionId }: { executionId: string }) {
             {selectedTest.artifacts
               .filter((a) => a.kind === "screenshot")
               .map((a) => (
-                <div key={a.filePath} style={{ marginTop: 12 }}>
+                <div key={a.id} style={{ marginTop: 12 }}>
                   <div className="muted mono" style={{ fontSize: 11, marginBottom: 4 }}>
                     {a.filePath}
                   </div>
-                  <img src={artifactUrl(a.filePath)} alt="Failure screenshot" style={{ maxWidth: "100%", border: "1px solid var(--color-border)", borderRadius: 6 }} />
+                  <img src={artifactUrl(a.id)} alt="Failure screenshot" style={{ maxWidth: "100%", border: "1px solid var(--color-border)", borderRadius: 6 }} />
                 </div>
               ))}
           </div>

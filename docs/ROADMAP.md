@@ -33,7 +33,17 @@ not a partial UI wired to fake data.
       `electron/services/recorder/`. Captured steps land in the same visual
       editor (`src/components/StepEditor.tsx`) used for manual test building, so
       marking any recorded field as random/boundary data is the same UI as
-      editing any other step.
+      editing any other step. Also captures `newTab` when a click opens a new
+      browser tab, generated as a `context.expect_page()`-wrapped click with
+      `self.page` reassigned — see "Tab switching" in `EXECUTION_ENGINE.md`.
+      `closeTab` and downloads are still not generated.
+- [x] Smart waits: environment-configurable timeout wired into both Playwright
+      action and `expect()` assertion waits (previously dead — the UI exposed
+      a timeout field that generated code never used), plus explicit
+      load-state waits after any step that might navigate. See
+      "Smart waits" in `EXECUTION_ENGINE.md`.
+- [x] Windows taskbar/window icon (`app/build/icon.png`, wired into both the
+      dev `BrowserWindow` and the electron-builder Windows target)
 - [ ] Windows `.exe` packaging via electron-builder (config present; full signed
       build deferred)
 

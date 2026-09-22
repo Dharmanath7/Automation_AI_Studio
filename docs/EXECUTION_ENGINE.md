@@ -118,6 +118,57 @@ finish before showing anything.
    `ExecutionResult`; the adapter only rejects its promise for genuine infrastructure
    problems (venv missing, pytest itself crashed before collecting tests).
 
+## Smart waits
+
+Generated tests wait intelligently for pages to actually be ready, rather than
+racing them, in three layers:
+
+1. **Locator auto-waiting.** Every generated locator (`page.get_by_role(...)`,
+   `get_by_label(...)`, etc.) is a lazily-resolved Playwright `Locator`, so
+   `.click()` / `.fill()` / `.check()` already auto-wait for the element to be
+   visible, stable, and actionable before acting — this is a Playwright
+   primitive, not something the generator adds.
+2. **Explicit load-state waits after anything that might navigate.** The
+   generator emits `self.page.wait_for_load_state("domcontentloaded")` after
+   every `navigate`, `click`, `doubleClick`, `goBack`, `goForward`, and
+   `refresh` step. When nothing actually navigated this returns immediately
+   (cheap); when something did — including an SPA transition — it prevents
+   the next step from racing a half-rendered page.
+3. **A configurable timeout budget, actually wired through.** Each
+   Environment has a `timeoutMs` setting (Environments & Credentials) that
+   flows through `ExecutionRequest.env.timeout_ms` → the `TIMEOUT_MS`
+   process env var → the generated `conftest.py`'s `env` fixture, which
+   calls both `context.set_default_timeout(...)` (covers `.click()`/`.fill()`
+   actions and any new tab) **and** `expect.set_options(timeout=...)`. The
+   second call matters most: Playwright's `expect()` assertions default to a
+   5-second timeout, far shorter than the 30-second action-timeout default —
+   a page that takes 6+ seconds to render the asserted text was failing even
+   though it would have passed a moment later. Verified with a real page
+   that delays its content by 7 seconds against the default 30s budget.
+
+## Tab switching
+
+A click that opens a new browser tab (`target="_blank"`, `window.open`,
+ctrl-click, ...) is recorded as a `click` step immediately followed by a
+`newTab` step (see `electron/services/recorder/recorderService.ts`, which
+listens for `BrowserContext.on("page", ...)`). The generator absorbs that
+pairing into the click itself:
+
+```python
+with self.page.context.expect_page() as new_page_info:
+    self.view_details.click()
+self.page = new_page_info.value
+self.page.wait_for_load_state("domcontentloaded")
+```
+
+Every step after the switch keeps working against the new tab because Page
+Object locators are generated as `@property` methods that resolve against
+`self.page` *at call time*, not as attributes bound once in `__init__`
+against whatever page existed at construction — otherwise reassigning
+`self.page` would silently leave every locator still querying the old tab.
+Closing a tab (`closeTab`) and downloads are not yet generated — see
+`ROADMAP.md`.
+
 ## Execution orchestration (caller side, not the adapter)
 
 `services/execution/executionService.ts` owns the sequence the adapter doesn't know

@@ -25,21 +25,21 @@ function renderLocatorExpr(candidate: LocatorCandidate, warnings: string[], step
   switch (candidate.strategy) {
     case "role":
       return candidate.roleName
-        ? `page.get_by_role(${pyStr(candidate.value)}, name=${pyStr(candidate.roleName)})`
-        : `page.get_by_role(${pyStr(candidate.value)})`;
+        ? `self.page.get_by_role(${pyStr(candidate.value)}, name=${pyStr(candidate.roleName)})`
+        : `self.page.get_by_role(${pyStr(candidate.value)})`;
     case "testId":
-      return `page.get_by_test_id(${pyStr(candidate.value)})`;
+      return `self.page.get_by_test_id(${pyStr(candidate.value)})`;
     case "label":
-      return `page.get_by_label(${pyStr(candidate.value)})`;
+      return `self.page.get_by_label(${pyStr(candidate.value)})`;
     case "placeholder":
-      return `page.get_by_placeholder(${pyStr(candidate.value)})`;
+      return `self.page.get_by_placeholder(${pyStr(candidate.value)})`;
     case "text":
-      return `page.get_by_text(${pyStr(candidate.value)})`;
+      return `self.page.get_by_text(${pyStr(candidate.value)})`;
     case "xpath":
-      return `page.locator(${pyStr("xpath=" + candidate.value)})`;
+      return `self.page.locator(${pyStr("xpath=" + candidate.value)})`;
     case "css":
     default:
-      return `page.locator(${pyStr(candidate.value)})`;
+      return `self.page.locator(${pyStr(candidate.value)})`;
   }
 }
 
@@ -210,6 +210,29 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
     const usedMethodNames = new Set<string>();
     const methods: { name: string; body: string[] }[] = [];
 
+    // A "newTab" step immediately following a click/doubleClick (exactly
+    // what the recorder emits when an interaction opens a new browser tab —
+    // see electron/services/recorder/recorderService.ts) is absorbed into
+    // that click: the click is wrapped in context.expect_page() and
+    // self.page is reassigned to the new tab, rather than generating a
+    // separate step for it.
+    const tabOpeningStepIds = new Set<string>();
+    const absorbedNewTabStepIds = new Set<string>();
+    for (let i = 0; i < enabledSteps.length; i++) {
+      const step = enabledSteps[i];
+      if (step.type !== "newTab") continue;
+      const prev = enabledSteps[i - 1];
+      if (prev && (prev.type === "click" || prev.type === "doubleClick")) {
+        tabOpeningStepIds.add(prev.id);
+        absorbedNewTabStepIds.add(step.id);
+      }
+    }
+    // Steps whose action plausibly triggers a same-tab navigation — a
+    // wait_for_load_state() after these is cheap when nothing actually
+    // navigated (it returns immediately) and prevents the classic "clicked
+    // too fast, next locator wasn't there yet" flake on slower pages.
+    const NAVIGATION_TRIGGERING_TYPES = new Set(["click", "doubleClick", "goBack", "goForward", "refresh"]);
+
     groups.forEach((group, index) => {
       let name = methodNameForGroup(group, index);
       if (reservedNames.has(name)) name = `${name}_flow`;
@@ -217,9 +240,12 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
       usedMethodNames.add(name);
 
       const body: string[] = [];
+      const smartWait = () => body.push('self.page.wait_for_load_state("domcontentloaded")');
+
       for (const step of group) {
         if (step.type === "navigate") {
           body.push(`self.page.goto(${renderValueExpr(step.value)})`);
+          smartWait();
           continue;
         }
         if (step.type === "assert") {
@@ -227,12 +253,21 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
           if (step.assertion) body.push(renderAssertion(step.assertion, locatorExpr, warnings, step.id));
           continue;
         }
-        if (step.type === "goBack") { body.push("self.page.go_back()"); continue; }
-        if (step.type === "goForward") { body.push("self.page.go_forward()"); continue; }
-        if (step.type === "refresh") { body.push("self.page.reload()"); continue; }
+        if (step.type === "goBack") { body.push("self.page.go_back()"); smartWait(); continue; }
+        if (step.type === "goForward") { body.push("self.page.go_forward()"); smartWait(); continue; }
+        if (step.type === "refresh") { body.push("self.page.reload()"); smartWait(); continue; }
         if (step.type === "pressKey") { body.push(`self.page.keyboard.press(${renderValueExpr(step.value)})`); continue; }
         if (step.type === "scroll") { body.push(`self.page.mouse.wheel(0, 800)`); continue; }
-        if (step.type === "newTab" || step.type === "closeTab" || step.type === "download" || step.type === "flowRef") {
+        if (step.type === "newTab") {
+          if (absorbedNewTabStepIds.has(step.id)) continue; // handled by the preceding click below
+          // A newTab step with no preceding click (e.g. added manually in
+          // the editor) — fall back to grabbing whatever tab most recently
+          // opened in this context.
+          body.push("self.page = self.page.context.pages[-1]");
+          smartWait();
+          continue;
+        }
+        if (step.type === "closeTab" || step.type === "download" || step.type === "flowRef") {
           warnings.push(`Step ${step.id}: "${step.type}" is not yet generated by the Phase 1 generator (Coming Soon) — emitting a TODO.`);
           body.push(`# TODO: "${step.type}" step not yet generated (Coming Soon)`);
           continue;
@@ -248,7 +283,22 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
           body.push(`# TODO: unsupported step type "${step.type}"`);
           continue;
         }
+
+        if ((step.type === "click" || step.type === "doubleClick") && tabOpeningStepIds.has(step.id)) {
+          // This click opens a new browser tab (recorded as a click
+          // immediately followed by a "newTab" step). Wrap it so Playwright
+          // captures the new Page object, then make it the active page for
+          // every step after this one — see docs/TEST_MODEL.md and the
+          // "tab switch" note in docs/EXECUTION_ENGINE.md.
+          body.push("with self.page.context.expect_page() as new_page_info:");
+          body.push(`    ${action(`self.${attr}`, renderValueExpr(step.value))}`);
+          body.push("self.page = new_page_info.value");
+          smartWait();
+          continue;
+        }
+
         body.push(action(`self.${attr}`, renderValueExpr(step.value)));
+        if (NAVIGATION_TRIGGERING_TYPES.has(step.type)) smartWait();
 
         if (step.screenshotOnStep) {
           body.push(`maybe_screenshot(self.page, ${pyStr(step.id)})`);
@@ -258,11 +308,20 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
     });
 
     // ---- pages/<test>_page.py -----------------------------------------
-    const initLines = locatorBindings.map(
-      (b) => `        self.${b.attrName} = ${renderLocatorExpr(b.candidate, warnings, "init")}`
-    );
+    // Locators are @property methods that resolve against self.page fresh
+    // on every access — not attributes bound once in __init__ — so that if
+    // a step reassigns self.page (see the tab-opening click handling
+    // above), every locator used afterward automatically resolves against
+    // the new tab instead of silently continuing to query the old one.
+    const propertyLines: string[] = [];
+    for (const b of locatorBindings) {
+      propertyLines.push("    @property");
+      propertyLines.push(`    def ${b.attrName}(self) -> Locator:`);
+      propertyLines.push(`        return ${renderLocatorExpr(b.candidate, warnings, "init")}`);
+      propertyLines.push("");
+    }
     const pageLines: string[] = [
-      "from playwright.sync_api import Page, expect",
+      "from playwright.sync_api import Page, Locator, expect",
       "",
       "from utils import random_data",
       "from utils.screenshots import maybe_screenshot",
@@ -273,8 +332,8 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
       "",
       "    def __init__(self, page: Page):",
       "        self.page = page",
-      ...(initLines.length > 0 ? initLines : ["        # No element locators were recorded for this test."]),
       "",
+      ...(propertyLines.length > 0 ? propertyLines : ["    # No element locators were recorded for this test.", ""]),
     ];
     for (const m of methods) {
       pageLines.push(`    def ${m.name}(self, env: dict, creds: dict) -> None:`);
@@ -325,7 +384,7 @@ function buildSupportFiles(_ctx: GenerationContext): GeneratedFile[] {
   const conftest = `import json
 import os
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 @pytest.fixture(scope="session")
@@ -333,6 +392,14 @@ def env():
     return {
         "base_url": os.environ.get("BASE_URL", ""),
         "api_url": os.environ.get("API_URL", ""),
+        # Smart-wait budget: how long actions, navigations, and assertions
+        # wait for the page to catch up before failing. Configured per
+        # Environment in Automation AI Studio (Environments & Credentials);
+        # defaults to 30s if unset. Playwright's own expect() default is a
+        # much stricter 5s, which is a common cause of tests failing on
+        # slower-loading pages even though the page eventually loads fine —
+        # see docs/EXECUTION_ENGINE.md "Smart waits".
+        "timeout_ms": int(os.environ.get("TIMEOUT_MS", "30000")),
     }
 
 
@@ -342,8 +409,15 @@ def creds():
     return json.loads(raw)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _configure_smart_waits(env):
+    # Applies to every expect(...) assertion in every generated test, not
+    # just this one — expect.set_options is process-global by design.
+    expect.set_options(timeout=env["timeout_ms"])
+
+
 @pytest.fixture()
-def page():
+def page(env):
     headless = os.environ.get("HEADLESS", "true").lower() == "true"
     browser_name = os.environ.get("BROWSER", "chromium")
     with sync_playwright() as playwright:
@@ -353,6 +427,11 @@ def page():
             launch_kwargs["channel"] = "chrome"
         browser = browser_type.launch(**launch_kwargs)
         context = browser.new_context()
+        # Context-level (not just page-level) so any additional tab/window
+        # opened during the test — see docs on the "newTab" step — inherits
+        # the same smart-wait budget automatically.
+        context.set_default_timeout(env["timeout_ms"])
+        context.set_default_navigation_timeout(env["timeout_ms"])
         page = context.new_page()
         yield page
         context.close()

@@ -163,10 +163,33 @@ export function getTestCase(db: SqlJsDatabase, id: string): TestCase | null {
 /**
  * Deletes a test case. Tags, suite membership, and automation mappings
  * cascade with it; past execution history is kept for reporting but has its
- * test_case_id set to NULL (see migration 002_test_case_delete).
+ * test_case_id set to NULL (see migration 002_test_case_delete). The
+ * project's remaining test cases are then renumbered (TC-1, TC-2, ...) so
+ * the displayed sequence never carries a gap where the deleted test used to
+ * be — execution history references test_case_id, not the TC-<n> label, so
+ * renumbering doesn't disturb past reports.
  */
 export function deleteTestCase(db: SqlJsDatabase, id: string): void {
+  const row = db.prepare("SELECT project_id FROM test_cases WHERE id = ?").get(id) as { project_id: string } | undefined;
+  if (!row) return;
   db.prepare("DELETE FROM test_cases WHERE id = ?").run(id);
+  renumberTestCases(db, row.project_id);
+}
+
+function renumberTestCases(db: SqlJsDatabase, projectId: string): void {
+  const remaining = db
+    .prepare("SELECT id FROM test_cases WHERE project_id = ? ORDER BY sequence ASC, created_at ASC")
+    .all(projectId) as { id: string }[];
+  const renumber = db.transaction((rows: { id: string }[]) => {
+    rows.forEach((r, i) => {
+      db.prepare("UPDATE test_cases SET sequence = ? WHERE id = ?").run(i + 1, r.id);
+    });
+    db.prepare(
+      `INSERT INTO test_case_sequence (project_id, next_value) VALUES (?, ?)
+       ON CONFLICT(project_id) DO UPDATE SET next_value = excluded.next_value`
+    ).run(projectId, rows.length + 1);
+  });
+  renumber(remaining);
 }
 
 /** Saves an edited Test Model (validated, never silently "fixed" — docs/TEST_MODEL.md). */

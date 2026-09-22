@@ -22,7 +22,20 @@ not a partial UI wired to fake data.
 - [x] `PlaywrightPythonPytestGenerator`: real Page Object + Pytest file generation
 - [x] `PythonExecutionAdapter`: spawns pytest, parses JSON report, captures
       failure screenshots
-- [x] Execution history + basic reporting dashboard, failure detail view
+- [x] Execution history + reporting dashboard with real analytics: an
+      execution-trend chart (pass/fail/skip stacked per run, oldest to
+      newest), tests-by-suite and failure-reason breakdowns, and a
+      pass/fail/skip status bar + human-readable (TC-<n> — title, not a raw
+      UUID) test list on the execution detail view. See
+      `src/components/charts/` — built against the dataviz skill's form/mark
+      guidance (status colors for pass/fail/skip, one sequential hue for
+      suite/failure magnitude, square-at-baseline stacked bars via an
+      SVG clip-path, since a plain per-segment `rx` rounds every segment's
+      corners including the ones that must stay square where they meet a
+      neighbor or the baseline — caught by rendering it, not just review).
+- [x] Deleting a test case renumbers the project's remaining test cases
+      (TC-1, TC-2, ... with no gap) — execution history keeps working
+      because it references test_case_id, not the display label.
 - [x] Browser recorder: launches a real Chrome window (via Playwright, `channel:
       "chrome"` — no separate browser download required), captures click/
       doubleClick/fill/select/check/uncheck/navigate live via an injected page

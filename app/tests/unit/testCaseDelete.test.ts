@@ -3,7 +3,7 @@ import type { SqlJsDatabase } from "../../electron/db/sqlJsWrapper";
 import { openDatabase } from "../../electron/db/connection";
 import { createProject } from "../../electron/services/projectService";
 import { createEnvironment } from "../../electron/services/environmentService";
-import { createTestCase, deleteTestCase, getTestCase } from "../../electron/services/testCaseService";
+import { createTestCase, deleteTestCase, getTestCase, listTestCases } from "../../electron/services/testCaseService";
 
 let db: SqlJsDatabase;
 
@@ -48,5 +48,24 @@ describe("deleteTestCase", () => {
       | undefined;
     expect(executionTestRow).toBeDefined();
     expect(executionTestRow!.test_case_id).toBeNull();
+  });
+
+  it("renumbers the remaining test cases contiguously (no gap) after a delete", () => {
+    const project = createProject(db, { name: "P3", code: `P3${Date.now()}`, projectDirectory: "C:/tmp/p3" });
+    const t1 = createTestCase(db, { projectId: project.id, title: "First" });
+    const t2 = createTestCase(db, { projectId: project.id, title: "Second" });
+    const t3 = createTestCase(db, { projectId: project.id, title: "Third" });
+    expect([t1.displayId, t2.displayId, t3.displayId]).toEqual(["TC-1", "TC-2", "TC-3"]);
+
+    deleteTestCase(db, t2.id);
+
+    const remaining = listTestCases(db, project.id).sort((a, b) => a.displayId.localeCompare(b.displayId, undefined, { numeric: true }));
+    expect(remaining.map((t) => t.title)).toEqual(["First", "Third"]);
+    expect(remaining.map((t) => t.displayId)).toEqual(["TC-1", "TC-2"]);
+
+    // A newly created test case continues from the compacted count, not
+    // from the pre-delete high-water mark (which would have produced TC-4).
+    const t4 = createTestCase(db, { projectId: project.id, title: "Fourth" });
+    expect(t4.displayId).toBe("TC-3");
   });
 });

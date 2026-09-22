@@ -82,6 +82,9 @@ const api: StudioApi = {
       return () => ipcRenderer.removeListener("recorder:event", listener);
     },
   },
+  analytics: {
+    dashboard: (projectId) => invoke("analytics:dashboard", { projectId }),
+  },
 };
 
 contextBridge.exposeInMainWorld("studio", api);

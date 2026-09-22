@@ -158,6 +158,7 @@ export interface ExecutionSummary {
   totalTests: number;
   passed: number;
   failed: number;
+  skipped: number;
 }
 
 export function listExecutions(db: SqlJsDatabase, projectId: string): ExecutionSummary[] {
@@ -166,7 +167,8 @@ export function listExecutions(db: SqlJsDatabase, projectId: string): ExecutionS
       `SELECT e.*,
         (SELECT COUNT(*) FROM execution_tests et WHERE et.execution_id = e.id) as total,
         (SELECT COUNT(*) FROM execution_tests et WHERE et.execution_id = e.id AND et.status = 'passed') as passed,
-        (SELECT COUNT(*) FROM execution_tests et WHERE et.execution_id = e.id AND et.status IN ('failed','errored')) as failed
+        (SELECT COUNT(*) FROM execution_tests et WHERE et.execution_id = e.id AND et.status IN ('failed','errored')) as failed,
+        (SELECT COUNT(*) FROM execution_tests et WHERE et.execution_id = e.id AND et.status = 'skipped') as skipped
        FROM executions e WHERE e.project_id = ? ORDER BY e.started_at DESC`
     )
     .all(projectId) as any[];
@@ -184,6 +186,7 @@ export function listExecutions(db: SqlJsDatabase, projectId: string): ExecutionS
     totalTests: r.total,
     passed: r.passed,
     failed: r.failed,
+    skipped: r.skipped,
   }));
 }
 

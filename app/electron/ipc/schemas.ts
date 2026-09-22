@@ -143,6 +143,8 @@ export const runtimeLastCheckSchema = z.object({ ...sessionField });
 export const browsersListSchema = z.object({ ...sessionField });
 export const frameworksListSchema = z.object({ ...sessionField });
 
+export const analyticsDashboardSchema = z.object({ ...sessionField, projectId: z.string().min(1) });
+
 export const recorderStartSchema = z.object({
   ...sessionField,
   baseUrl: z.string().min(1),

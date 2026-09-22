@@ -18,6 +18,7 @@ import { writeGeneratedCode, getAutomationMapping, readProjectFile } from "../se
 import { runExecution, listExecutions, getExecution } from "../services/execution/executionService";
 import { checkAndCacheRuntime, getLastRuntimeCheck } from "../services/runtimeService";
 import { startRecording, stopRecording } from "../services/recorder/recorderService";
+import { getDashboardAnalytics } from "../services/analyticsService";
 import { getLogger } from "../services/logger";
 import type { TestModel } from "../shared/testModel";
 import * as schemas from "./schemas";
@@ -192,6 +193,11 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   );
   handleAuthed("frameworks:list", schemas.frameworksListSchema, () =>
     getDb().prepare("SELECT * FROM framework_configs ORDER BY language, framework").all()
+  );
+
+  // ---- Analytics -------------------------------------------------------------
+  handleAuthed("analytics:dashboard", schemas.analyticsDashboardSchema, ({ projectId }) =>
+    getDashboardAnalytics(getDb(), projectId)
   );
 
   // ---- Browser recorder ----------------------------------------------------

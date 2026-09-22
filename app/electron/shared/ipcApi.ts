@@ -10,6 +10,7 @@ import type { CredentialProfile, CredentialFieldSummary } from "../services/cred
 import type { TestCase, CreateTestCaseInput } from "../services/testCaseService";
 import type { TestModel, TestStep } from "./testModel";
 import type { RecorderEvent } from "../services/recorder/recorderService";
+import type { DashboardAnalytics } from "../services/analyticsService";
 import type { WriteOutcome, AutomationMapping } from "../services/codegen/generationService";
 import type { RunRequest, ExecutionSummary, ExecutionDetail } from "../services/execution/executionService";
 import type { ExecutionEvent, RuntimeCheckResult } from "../services/execution/ExecutionAdapter";
@@ -98,6 +99,9 @@ export interface StudioApi {
     stop(recordingId: string): Promise<Envelope<{ steps: TestStep[] }>>;
     onEvent(cb: (event: RecorderEvent) => void): () => void;
   };
+  analytics: {
+    dashboard(projectId: string): Promise<Envelope<DashboardAnalytics>>;
+  };
 }
 
 declare global {
@@ -115,3 +119,4 @@ export type { TestCase, CreateTestCaseInput } from "../services/testCaseService"
 export type { WriteOutcome, AutomationMapping } from "../services/codegen/generationService";
 export type { RunRequest, ExecutionSummary, ExecutionDetail, TriggerType } from "../services/execution/executionService";
 export type { ExecutionEvent, RuntimeCheckResult, ExecutionResult, NormalizedTestResult } from "../services/execution/ExecutionAdapter";
+export type { DashboardAnalytics, ExecutionTrendPoint } from "../services/analyticsService";

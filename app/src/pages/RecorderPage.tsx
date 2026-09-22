@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, useStepList } from "@/components/StepEditor";
+import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
 import { STEP_TYPES, type TestStep } from "@shared/testModel";
 
 type Phase = "configure" | "recording" | "review";
@@ -112,11 +113,15 @@ export default function RecorderPage() {
     const testCaseId = createRes.data.id;
     const model = { ...createRes.data.testModel, name: name.trim(), tags, steps };
     const saveRes = await window.studio.testCases.saveModel(testCaseId, model);
-    setIsSaving(false);
     if (!saveRes.ok) {
+      setIsSaving(false);
       setSaveError(saveRes.error);
       return;
     }
+    // Generate code now so the editor can show it immediately on arrival,
+    // instead of the user having to click "Generate Code" again.
+    await window.studio.codegen.generate(testCaseId);
+    setIsSaving(false);
     navigate(`/tests/${testCaseId}`);
   }
 
@@ -134,12 +139,18 @@ export default function RecorderPage() {
             text — they're stored as a Credential Vault reference automatically.
           </p>
           {!environment && <div className="error-banner">Select an environment from the top bar first.</div>}
-          <div className="row wrap">
-            <span className="muted">Environment: {environment?.name ?? "none"}</span>
-            <select value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-              <option value="chrome">Chrome</option>
-              <option value="chromium">Chromium</option>
-            </select>
+          <div className="row wrap" style={{ alignItems: "flex-end" }}>
+            <div className="mini-field">
+              <span className="mini-label">Environment</span>
+              <input aria-label="Environment" value={environment?.name ?? "none selected"} disabled style={{ minWidth: 140 }} />
+            </div>
+            <div className="mini-field">
+              <span className="mini-label">Browser</span>
+              <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
+                <option value="chrome">Chrome</option>
+                <option value="chromium">Chromium</option>
+              </select>
+            </div>
             <button className="primary" onClick={() => void handleStart()} disabled={!environment || isStarting}>
               {isStarting ? "Launching…" : "Launch Recorder"}
             </button>
@@ -185,16 +196,20 @@ export default function RecorderPage() {
           )}
           <div className="card">
             <div className="field">
-              <label>Test Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Search Provider" autoFocus />
+              <label htmlFor="recordedTestName">Test Name</label>
+              <input id="recordedTestName" value={name} onChange={(e) => setName(e.target.value)} placeholder="Search Provider" autoFocus />
             </div>
             <div className="field">
               <label>Suites</label>
+              <p className="muted" style={{ marginTop: -2, marginBottom: 8, fontSize: 12 }}>
+                A test can belong to more than one suite at once — select all that apply.
+              </p>
               <div className="row wrap">
                 {BUILT_IN_TAGS.map((tag) => (
-                  <label key={tag} style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", fontWeight: 400 }}>
-                    <input type="checkbox" style={{ width: "auto" }} checked={tags.includes(tag)} onChange={() => toggleTag(tag)} />
-                    {tag}
+                  <label key={tag} className={`suite-toggle${tags.includes(tag) ? " active" : ""}`}>
+                    <input type="checkbox" checked={tags.includes(tag)} onChange={() => toggleTag(tag)} />
+                    {tags.includes(tag) ? "✓ " : ""}
+                    {tag.toUpperCase()}
                   </label>
                 ))}
               </div>
@@ -206,7 +221,7 @@ export default function RecorderPage() {
               <h3 style={{ margin: 0 }}>Steps</h3>
               <span className="muted">Edit locators, delete noise, mark any field as random/boundary data before saving.</span>
               <div className="spacer" />
-              <select onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
+              <select aria-label="Add step" onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
                 <option value="" disabled>
                   + Add step…
                 </option>
@@ -231,6 +246,8 @@ export default function RecorderPage() {
               {steps.length === 0 && <p className="muted">No steps recorded. Go back and record, or add steps manually.</p>}
             </div>
           </div>
+
+          {currentProject && <CredentialsUsedPanel projectId={currentProject.id} environment={environment} steps={steps} />}
 
           {saveError && <div className="error-banner">{saveError}</div>}
           <div className="row">

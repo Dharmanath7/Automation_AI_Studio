@@ -217,8 +217,17 @@ function CredentialsSection({ projectId }: { projectId: string }) {
             ))}
             {profiles.length === 0 && <p className="muted">No profiles yet.</p>}
           </div>
-          <form className="row" onSubmit={createProfile}>
-            <input value={newProfileName} onChange={(e) => setNewProfileName(e.target.value)} placeholder="TST Admin" required />
+          <form className="row" onSubmit={createProfile} style={{ alignItems: "flex-end" }}>
+            <div className="mini-field">
+              <span className="mini-label">New Profile Name</span>
+              <input
+                aria-label="New credential profile name"
+                value={newProfileName}
+                onChange={(e) => setNewProfileName(e.target.value)}
+                placeholder="TST Admin"
+                required
+              />
+            </div>
             <button type="submit">Add</button>
           </form>
         </div>
@@ -252,21 +261,28 @@ function CredentialsSection({ projectId }: { projectId: string }) {
                   )}
                 </tbody>
               </table>
-              <form className="row" onSubmit={saveField}>
-                <select value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} style={{ maxWidth: 160 }}>
-                  <option value="username">username</option>
-                  <option value="password">password</option>
-                  <option value="api_token">api_token</option>
-                  <option value="client_id">client_id</option>
-                  <option value="client_secret">client_secret</option>
-                </select>
-                <input
-                  type="password"
-                  value={fieldValue}
-                  onChange={(e) => setFieldValue(e.target.value)}
-                  placeholder="Value"
-                  required
-                />
+              <form className="row" onSubmit={saveField} style={{ alignItems: "flex-end" }}>
+                <div className="mini-field">
+                  <span className="mini-label">Field</span>
+                  <select aria-label="Credential field key" value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} style={{ maxWidth: 160 }}>
+                    <option value="username">username</option>
+                    <option value="password">password</option>
+                    <option value="api_token">api_token</option>
+                    <option value="client_id">client_id</option>
+                    <option value="client_secret">client_secret</option>
+                  </select>
+                </div>
+                <div className="mini-field">
+                  <span className="mini-label">Value</span>
+                  <input
+                    aria-label="Credential value"
+                    type="password"
+                    value={fieldValue}
+                    onChange={(e) => setFieldValue(e.target.value)}
+                    placeholder="Value"
+                    required
+                  />
+                </div>
                 <button type="submit" className="primary">
                   Save
                 </button>

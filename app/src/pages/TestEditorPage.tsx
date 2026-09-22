@@ -1,21 +1,28 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import { STEP_TYPES, type TestStep, type TestModel } from "@shared/testModel";
 import type { AutomationMapping, WriteOutcome } from "@shared/ipcApi";
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, newStep } from "@/components/StepEditor";
+import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 export default function TestEditorPage() {
   const { testCaseId } = useParams();
+  const navigate = useNavigate();
   const currentProject = useProjectStore((s) => s.currentProject());
   const currentEnvironmentId = useProjectStore((s) => s.currentEnvironmentId);
   const environments = useProjectStore((s) => s.environments);
+  const selectProject = useProjectStore((s) => s.selectProject);
+  const environment = environments.find((e) => e.id === currentEnvironmentId);
 
   const [model, setModel] = useState<TestModel | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [genResult, setGenResult] = useState<WriteOutcome | null>(null);
   const [genError, setGenError] = useState<string | null>(null);
@@ -38,6 +45,16 @@ export default function TestEditorPage() {
       if (r.ok) setMapping(r.data);
     });
   }, [testCaseId]);
+
+  // If this test already has generated code, show it immediately rather
+  // than making the user click "Generate Code" again just to see what was
+  // produced (this is especially useful right after saving a recording).
+  useEffect(() => {
+    if (mapping?.generatedTestFile && currentProject) {
+      void openCodeFile(mapping.generatedTestFile);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapping?.generatedTestFile, currentProject?.id]);
 
   function updateStep(id: string, updater: (s: TestStep) => TestStep) {
     setModel((m) => (m ? { ...m, steps: m.steps.map((s) => (s.id === id ? updater(s) : s)) } : m));
@@ -80,6 +97,14 @@ export default function TestEditorPage() {
     }
     setSavedOk(true);
     setModel(res.data.testModel);
+  }
+
+  async function handleDelete() {
+    if (!testCaseId) return;
+    setIsDeleting(true);
+    const res = await window.studio.testCases.delete(testCaseId);
+    setIsDeleting(false);
+    if (res.ok) navigate("/tests");
   }
 
   async function handleGenerate(forcePaths?: string[]) {
@@ -131,12 +156,19 @@ export default function TestEditorPage() {
   return (
     <div className="stack">
       <div className="row">
-        <input
-          style={{ fontSize: 18, fontWeight: 700, border: "none", background: "transparent", padding: 0 }}
-          value={model.name}
-          onChange={(e) => setModel({ ...model, name: e.target.value })}
-        />
+        <div className="mini-field" style={{ minWidth: 320 }}>
+          <span className="mini-label">Test Name</span>
+          <input
+            aria-label="Test name"
+            style={{ fontSize: 17, fontWeight: 700 }}
+            value={model.name}
+            onChange={(e) => setModel({ ...model, name: e.target.value })}
+          />
+        </div>
         <div className="spacer" />
+        <button className="danger" onClick={() => setShowDeleteConfirm(true)}>
+          Delete Test
+        </button>
         <button onClick={() => void handleSave()} disabled={isSaving} className="primary">
           {isSaving ? "Saving…" : "Save"}
         </button>
@@ -144,13 +176,27 @@ export default function TestEditorPage() {
       {saveError && <div className="error-banner">{saveError}</div>}
       {savedOk && !saveError && <div className="badge passed" style={{ width: "fit-content" }}>Saved</div>}
 
+      {showDeleteConfirm && (
+        <ConfirmDialog
+          title="Delete this test case?"
+          message={`"${model.name}" and its generation history will be removed. Past execution results are kept for reporting. This can't be undone.`}
+          confirmLabel={isDeleting ? "Deleting…" : "Delete"}
+          onConfirm={() => void handleDelete()}
+          onCancel={() => setShowDeleteConfirm(false)}
+        />
+      )}
+
       <div className="card">
         <h3>Suites</h3>
+        <p className="muted" style={{ marginTop: -4, marginBottom: 12, fontSize: 12 }}>
+          A test can belong to more than one suite at once — select all that apply.
+        </p>
         <div className="row wrap">
           {BUILT_IN_TAGS.map((tag) => (
-            <label key={tag} style={{ display: "flex", alignItems: "center", gap: 6, textTransform: "none", fontWeight: 400 }}>
-              <input type="checkbox" style={{ width: "auto" }} checked={model.tags.includes(tag)} onChange={() => toggleTag(tag)} />
-              {tag}
+            <label key={tag} className={`suite-toggle${model.tags.includes(tag) ? " active" : ""}`}>
+              <input type="checkbox" checked={model.tags.includes(tag)} onChange={() => toggleTag(tag)} />
+              {model.tags.includes(tag) ? "✓ " : ""}
+              {tag.toUpperCase()}
             </label>
           ))}
           {customTags.map((tag) => (
@@ -168,7 +214,7 @@ export default function TestEditorPage() {
         <div className="row">
           <h3 style={{ margin: 0 }}>Steps</h3>
           <div className="spacer" />
-          <select onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
+          <select aria-label="Add step" onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
             <option value="" disabled>
               + Add step…
             </option>
@@ -194,12 +240,21 @@ export default function TestEditorPage() {
         </div>
       </div>
 
+      {currentProject && (
+        <CredentialsUsedPanel
+          projectId={currentProject.id}
+          environment={environment}
+          steps={model.steps}
+          onEnvironmentUpdated={() => void selectProject(currentProject.id)}
+        />
+      )}
+
       <div className="card">
         <div className="row">
           <h3 style={{ margin: 0 }}>Generated Automation</h3>
           <div className="spacer" />
           <button onClick={() => void handleGenerate()} disabled={isGenerating}>
-            {isGenerating ? "Generating…" : "Generate Code"}
+            {isGenerating ? "Generating…" : mapping ? "Regenerate Code" : "Generate Code"}
           </button>
         </div>
         {genError && <div className="error-banner">{genError}</div>}
@@ -247,9 +302,13 @@ export default function TestEditorPage() {
           </div>
         )}
         {codeView && (
-          <div style={{ marginTop: 12, border: "1px solid var(--color-border)", borderRadius: 6, overflow: "hidden" }}>
-            <div className="mono" style={{ padding: "6px 10px", background: "#f3f5f9", fontSize: 12 }}>
+          <div style={{ marginTop: 12, border: "1px solid var(--color-border)", borderRadius: 10, overflow: "hidden" }}>
+            <div className="mono row" style={{ padding: "8px 12px", background: "#f6f6fd", fontSize: 12 }}>
               {codeView.path}
+              <div className="spacer" />
+              <span className="muted" style={{ fontSize: 11 }}>
+                Generated — read only
+              </span>
             </div>
             <Editor height="360px" language="python" value={codeView.content} options={{ readOnly: true, minimap: { enabled: false } }} />
           </div>
@@ -258,16 +317,22 @@ export default function TestEditorPage() {
 
       <div className="card">
         <h3>Run</h3>
-        <div className="row wrap">
-          <select value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-            <option value="chrome">Chrome</option>
-            <option value="chromium">Chromium</option>
-          </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-            <option value="headless">Headless</option>
-            <option value="headed">Headed</option>
-          </select>
-          <span className="muted">Environment: {environments.find((e) => e.id === currentEnvironmentId)?.name ?? "none selected"}</span>
+        <div className="row wrap" style={{ alignItems: "flex-end" }}>
+          <div className="mini-field">
+            <span className="mini-label">Browser</span>
+            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
+              <option value="chrome">Chrome</option>
+              <option value="chromium">Chromium</option>
+            </select>
+          </div>
+          <div className="mini-field">
+            <span className="mini-label">Mode</span>
+            <select aria-label="Execution mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+              <option value="headless">Headless</option>
+              <option value="headed">Headed</option>
+            </select>
+          </div>
+          <span className="muted">Environment: {environment?.name ?? "none selected"}</span>
           <button className="primary" onClick={() => void handleRun()} disabled={isRunning || !currentEnvironmentId || !mapping}>
             {isRunning ? "Running…" : "Run Test"}
           </button>

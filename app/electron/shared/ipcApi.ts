@@ -55,6 +55,7 @@ export interface StudioApi {
   environments: {
     list(projectId: string): Promise<Envelope<Environment[]>>;
     create(input: CreateEnvironmentInput): Promise<Envelope<Environment>>;
+    setCredentialProfile(environmentId: string, credentialProfileId: string | null): Promise<Envelope<Environment>>;
   };
   credentials: {
     listProfiles(projectId: string): Promise<Envelope<CredentialProfile[]>>;
@@ -68,6 +69,7 @@ export interface StudioApi {
     create(input: CreateTestCaseInput): Promise<Envelope<TestCase>>;
     get(id: string): Promise<Envelope<TestCase | null>>;
     saveModel(testCaseId: string, model: TestModel): Promise<Envelope<TestCase>>;
+    delete(id: string): Promise<Envelope<{ deleted: boolean }>>;
   };
   codegen: {
     generate(testCaseId: string, forcePaths?: string[]): Promise<Envelope<WriteOutcome>>;

@@ -160,6 +160,15 @@ export function getTestCase(db: SqlJsDatabase, id: string): TestCase | null {
   return row ? toTestCase(db, row) : null;
 }
 
+/**
+ * Deletes a test case. Tags, suite membership, and automation mappings
+ * cascade with it; past execution history is kept for reporting but has its
+ * test_case_id set to NULL (see migration 002_test_case_delete).
+ */
+export function deleteTestCase(db: SqlJsDatabase, id: string): void {
+  db.prepare("DELETE FROM test_cases WHERE id = ?").run(id);
+}
+
 /** Saves an edited Test Model (validated, never silently "fixed" — docs/TEST_MODEL.md). */
 export function saveTestModel(db: SqlJsDatabase, testCaseId: string, model: TestModel, knownBaseUrls: string[]): TestCase {
   const issues = validateTestModel(model, knownBaseUrls);

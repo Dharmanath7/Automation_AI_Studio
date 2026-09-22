@@ -108,19 +108,31 @@ export default function ExecutionPage() {
           </p>
         )}
 
-        <div className="row wrap" style={{ marginTop: 16 }}>
-          <select value={currentEnvironmentId ?? ""} disabled>
-            <option>{environments.find((e) => e.id === currentEnvironmentId)?.name ?? "No environment selected"}</option>
-          </select>
-          <select value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-            <option value="chrome">Chrome</option>
-            <option value="chromium">Chromium</option>
-          </select>
-          <select value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
-            <option value="headless">Headless</option>
-            <option value="headed">Headed</option>
-          </select>
-          <input placeholder="Build (optional)" value={buildId} onChange={(e) => setBuildId(e.target.value)} style={{ maxWidth: 160 }} />
+        <div className="row wrap" style={{ marginTop: 16, alignItems: "flex-end" }}>
+          <div className="mini-field">
+            <span className="mini-label">Environment</span>
+            <select aria-label="Environment" value={currentEnvironmentId ?? ""} disabled style={{ minWidth: 130 }}>
+              <option>{environments.find((e) => e.id === currentEnvironmentId)?.name ?? "No environment selected"}</option>
+            </select>
+          </div>
+          <div className="mini-field">
+            <span className="mini-label">Browser</span>
+            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
+              <option value="chrome">Chrome</option>
+              <option value="chromium">Chromium</option>
+            </select>
+          </div>
+          <div className="mini-field">
+            <span className="mini-label">Mode</span>
+            <select aria-label="Execution mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
+              <option value="headless">Headless</option>
+              <option value="headed">Headed</option>
+            </select>
+          </div>
+          <div className="mini-field">
+            <span className="mini-label">Build (optional)</span>
+            <input aria-label="Build id" placeholder="e.g. 2026.09.22.1" value={buildId} onChange={(e) => setBuildId(e.target.value)} style={{ maxWidth: 160 }} />
+          </div>
           <button
             className="primary"
             onClick={() => void handleRun()}

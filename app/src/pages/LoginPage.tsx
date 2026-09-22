@@ -17,7 +17,8 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
-      <form className="card login-card" onSubmit={handleSubmit}>
+      <form className="login-card" onSubmit={handleSubmit}>
+        <div className="logo-mark">AI</div>
         <div className="brand">Automation AI Studio</div>
         <div className="subtitle">Intelligent end-to-end QA automation</div>
 

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useProjectStore } from "@/state/projectStore";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import type { TestCase } from "@shared/ipcApi";
 
 export default function TestsPage() {
@@ -11,6 +12,8 @@ export default function TestsPage() {
   const [showForm, setShowForm] = useState(searchParams.get("new") === "1");
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<TestCase | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   async function refresh() {
     if (!currentProjectId) return;
@@ -35,6 +38,15 @@ export default function TestsPage() {
     navigate(`/tests/${res.data.id}`);
   }
 
+  async function handleDelete() {
+    if (!pendingDelete) return;
+    setIsDeleting(true);
+    const res = await window.studio.testCases.delete(pendingDelete.id);
+    setIsDeleting(false);
+    setPendingDelete(null);
+    if (res.ok) await refresh();
+  }
+
   if (!currentProjectId) return <p className="muted">Select a project first.</p>;
 
   return (
@@ -48,13 +60,33 @@ export default function TestsPage() {
       </div>
 
       {showForm && (
-        <form className="card row" onSubmit={handleCreate}>
+        <form className="card row" onSubmit={handleCreate} style={{ alignItems: "flex-end" }}>
           {error && <div className="error-banner">{error}</div>}
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Search Provider" required autoFocus />
+          <div className="mini-field" style={{ flex: 1 }}>
+            <span className="mini-label">Test Title</span>
+            <input
+              aria-label="Test title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Search Provider"
+              required
+              autoFocus
+            />
+          </div>
           <button type="submit" className="primary">
             Create &amp; Edit
           </button>
         </form>
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete this test case?"
+          message={`"${pendingDelete.title}" and its generation history will be removed. Past execution results are kept for reporting. This can't be undone.`}
+          confirmLabel={isDeleting ? "Deleting…" : "Delete"}
+          onConfirm={() => void handleDelete()}
+          onCancel={() => setPendingDelete(null)}
+        />
       )}
 
       <div className="card" style={{ padding: 0 }}>
@@ -64,8 +96,9 @@ export default function TestsPage() {
               <th>ID</th>
               <th>Title</th>
               <th>Priority</th>
-              <th>Tags</th>
+              <th>Suites</th>
               <th>Automation Status</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -80,15 +113,27 @@ export default function TestsPage() {
                       {tag}
                     </span>
                   ))}
+                  {t.tags.length === 0 && <span className="muted">—</span>}
                 </td>
                 <td>
                   <span className={`badge ${t.automationStatus === "automated" ? "passed" : "neutral"}`}>{t.automationStatus}</span>
+                </td>
+                <td>
+                  <button
+                    className="ghost danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPendingDelete(t);
+                    }}
+                  >
+                    Delete
+                  </button>
                 </td>
               </tr>
             ))}
             {testCases.length === 0 && (
               <tr>
-                <td colSpan={5} className="muted">
+                <td colSpan={6} className="muted">
                   No test cases yet.
                 </td>
               </tr>

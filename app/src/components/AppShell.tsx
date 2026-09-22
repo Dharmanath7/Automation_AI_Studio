@@ -31,7 +31,10 @@ export default function AppShell() {
   return (
     <div className="app-shell">
       <nav className="sidebar">
-        <div className="brand">Automation AI Studio</div>
+        <div className="brand">
+          <span className="logo-dot" />
+          Automation AI Studio
+        </div>
 
         <NavLink to="/dashboard">Dashboard</NavLink>
         <NavLink to="/projects">Projects</NavLink>
@@ -66,7 +69,7 @@ export default function AppShell() {
       <div className="main-area">
         <div className="topbar">
           <div className="row" style={{ minWidth: 260 }}>
-            <select value={currentProjectId ?? ""} onChange={(e) => void selectProject(e.target.value || null)}>
+            <select aria-label="Current project" value={currentProjectId ?? ""} onChange={(e) => void selectProject(e.target.value || null)}>
               <option value="">Select a project…</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -77,6 +80,7 @@ export default function AppShell() {
           </div>
           <div className="row" style={{ minWidth: 180 }}>
             <select
+              aria-label="Current environment"
               value={currentEnvironmentId ?? ""}
               onChange={(e) => selectEnvironment(e.target.value || null)}
               disabled={environments.length === 0}

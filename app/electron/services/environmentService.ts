@@ -104,6 +104,18 @@ export function listEnvironments(db: SqlJsDatabase, projectId: string): Environm
   return rows.map(toEnvironment);
 }
 
+/** Sets which Credential Vault profile a `credentials.default.*` reference resolves to for this environment. */
+export function setDefaultCredentialProfile(db: SqlJsDatabase, environmentId: string, credentialProfileId: string | null): Environment {
+  db.prepare("UPDATE environments SET default_credential_profile_id = ?, updated_at = ? WHERE id = ?").run(
+    credentialProfileId,
+    new Date().toISOString(),
+    environmentId
+  );
+  const env = getEnvironment(db, environmentId);
+  if (!env) throw new EnvironmentValidationError("Environment not found.");
+  return env;
+}
+
 export function getEnvironment(db: SqlJsDatabase, id: string): Environment | null {
   const row = db.prepare("SELECT * FROM environments WHERE id = ?").get(id) as EnvironmentRow | undefined;
   return row ? toEnvironment(row) : null;

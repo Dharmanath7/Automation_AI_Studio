@@ -31,6 +31,11 @@ export const projectsCreateSchema = z.object({
 export const projectsGetSchema = z.object({ ...sessionField, id: z.string().min(1) });
 
 export const environmentsListSchema = z.object({ ...sessionField, projectId: z.string().min(1) });
+export const environmentsSetCredentialProfileSchema = z.object({
+  ...sessionField,
+  environmentId: z.string().min(1),
+  credentialProfileId: z.string().min(1).nullable(),
+});
 export const environmentsCreateSchema = z.object({
   ...sessionField,
   input: z.object({
@@ -77,6 +82,7 @@ export const testCasesCreateSchema = z.object({
   }),
 });
 export const testCasesGetSchema = z.object({ ...sessionField, id: z.string().min(1) });
+export const testCasesDeleteSchema = z.object({ ...sessionField, id: z.string().min(1) });
 
 const testStepSchema = z.object({
   id: z.string(),

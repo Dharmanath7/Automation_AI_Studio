@@ -88,7 +88,8 @@ export function StepRow({
         <span className="step-index">{index + 1}</span>
         <span className="step-type-badge">{step.type}</span>
         <input
-          placeholder="note (optional)"
+          aria-label="Step note (optional)"
+          placeholder="Note (optional)"
           value={step.note ?? ""}
           onChange={(e) => onChange((s) => ({ ...s, note: e.target.value }))}
           style={{ maxWidth: 220 }}
@@ -105,53 +106,69 @@ export function StepRow({
       </div>
 
       {needsTarget && step.target && (
-        <div className="row wrap" style={{ marginTop: 8 }}>
-          <select
-            value={step.target.preferred.strategy}
-            onChange={(e) =>
-              onChange((s) => ({
-                ...s,
-                target: { ...s.target!, preferred: { ...s.target!.preferred, strategy: e.target.value as LocatorStrategy } },
-              }))
-            }
-          >
-            {(["role", "testId", "label", "placeholder", "text", "css", "xpath"] as LocatorStrategy[]).map((strat) => (
-              <option key={strat} value={strat}>
-                {strat}
-              </option>
-            ))}
-          </select>
-          <input
-            placeholder={step.target.preferred.strategy === "role" ? "role, e.g. button" : "locator value"}
-            value={step.target.preferred.value}
-            onChange={(e) =>
-              onChange((s) => ({ ...s, target: { ...s.target!, preferred: { ...s.target!.preferred, value: e.target.value } } }))
-            }
-          />
-          {step.target.preferred.strategy === "role" && (
-            <input
-              placeholder="accessible name, e.g. Login"
-              value={step.target.preferred.roleName ?? ""}
+        <div className="row wrap" style={{ marginTop: 8, alignItems: "flex-end" }}>
+          <div className="mini-field">
+            <span className="mini-label">Locator Strategy</span>
+            <select
+              aria-label="Locator strategy"
+              value={step.target.preferred.strategy}
               onChange={(e) =>
-                onChange((s) => ({ ...s, target: { ...s.target!, preferred: { ...s.target!.preferred, roleName: e.target.value } } }))
+                onChange((s) => ({
+                  ...s,
+                  target: { ...s.target!, preferred: { ...s.target!.preferred, strategy: e.target.value as LocatorStrategy } },
+                }))
+              }
+            >
+              {(["role", "testId", "label", "placeholder", "text", "css", "xpath"] as LocatorStrategy[]).map((strat) => (
+                <option key={strat} value={strat}>
+                  {strat}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="mini-field">
+            <span className="mini-label">{step.target.preferred.strategy === "role" ? "Role" : "Locator Value"}</span>
+            <input
+              aria-label="Locator value"
+              placeholder={step.target.preferred.strategy === "role" ? "e.g. button" : "locator value"}
+              value={step.target.preferred.value}
+              onChange={(e) =>
+                onChange((s) => ({ ...s, target: { ...s.target!, preferred: { ...s.target!.preferred, value: e.target.value } } }))
               }
             />
+          </div>
+          {step.target.preferred.strategy === "role" && (
+            <div className="mini-field">
+              <span className="mini-label">Accessible Name</span>
+              <input
+                aria-label="Accessible name"
+                placeholder="e.g. Login"
+                value={step.target.preferred.roleName ?? ""}
+                onChange={(e) =>
+                  onChange((s) => ({ ...s, target: { ...s.target!, preferred: { ...s.target!.preferred, roleName: e.target.value } } }))
+                }
+              />
+            </div>
           )}
-          <select
-            value={step.target.preferred.quality}
-            onChange={(e) =>
-              onChange((s) => ({
-                ...s,
-                target: { ...s.target!, preferred: { ...s.target!.preferred, quality: e.target.value as LocatorQuality } },
-              }))
-            }
-          >
-            {(["excellent", "good", "fair", "fragile", "avoid"] as LocatorQuality[]).map((q) => (
-              <option key={q} value={q}>
-                {q}
-              </option>
-            ))}
-          </select>
+          <div className="mini-field">
+            <span className="mini-label">Locator Quality</span>
+            <select
+              aria-label="Locator quality"
+              value={step.target.preferred.quality}
+              onChange={(e) =>
+                onChange((s) => ({
+                  ...s,
+                  target: { ...s.target!, preferred: { ...s.target!.preferred, quality: e.target.value as LocatorQuality } },
+                }))
+              }
+            >
+              {(["excellent", "good", "fair", "fragile", "avoid"] as LocatorQuality[]).map((q) => (
+                <option key={q} value={q}>
+                  {q}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       )}
 
@@ -178,71 +195,104 @@ export function AssertionEditor({ assertion, onChange }: { assertion: Assertion;
   const needsExpected = ASSERTIONS_NEEDING_EXPECTED.includes(assertion.type);
   return (
     <div className="stack" style={{ gap: 8 }}>
-      <div className="row wrap">
-        <select value={assertion.type} onChange={(e) => onChange({ ...assertion, type: e.target.value as Assertion["type"] })}>
-          {ASSERTION_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
+      <div className="row wrap" style={{ alignItems: "flex-end" }}>
+        <div className="mini-field">
+          <span className="mini-label">Assertion Type</span>
+          <select aria-label="Assertion type" value={assertion.type} onChange={(e) => onChange({ ...assertion, type: e.target.value as Assertion["type"] })}>
+            {ASSERTION_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
         {assertion.type === "attributeEquals" && (
-          <input
-            placeholder="attribute name"
-            value={assertion.attribute ?? ""}
-            onChange={(e) => onChange({ ...assertion, attribute: e.target.value })}
-          />
+          <div className="mini-field">
+            <span className="mini-label">Attribute Name</span>
+            <input
+              aria-label="Attribute name"
+              placeholder="e.g. aria-disabled"
+              value={assertion.attribute ?? ""}
+              onChange={(e) => onChange({ ...assertion, attribute: e.target.value })}
+            />
+          </div>
         )}
       </div>
-      {needsExpected && <ValueEditor value={assertion.expected} onChange={(v) => onChange({ ...assertion, expected: v })} />}
+      {needsExpected && <ValueEditor value={assertion.expected} onChange={(v) => onChange({ ...assertion, expected: v })} label="Expected Value" />}
     </div>
   );
 }
 
-export function ValueEditor({ value, onChange }: { value: TestValue | undefined; onChange: (v: TestValue) => void }) {
+export function ValueEditor({
+  value,
+  onChange,
+  label = "Value Source",
+}: {
+  value: TestValue | undefined;
+  onChange: (v: TestValue) => void;
+  label?: string;
+}) {
   const kind = value?.kind ?? "literal";
 
   return (
-    <div className="row wrap">
-      <select
-        value={kind}
-        onChange={(e) => {
-          const newKind = e.target.value as TestValue["kind"];
-          if (newKind === "literal") onChange({ kind: "literal", value: "" });
-          else if (newKind === "variable") onChange({ kind: "variable", path: "base_url" });
-          else if (newKind === "random") onChange({ kind: "random", generator: "fullName", seedOnce: true });
-          else onChange({ kind: "boundary", boundary: "empty" });
-        }}
-      >
-        <option value="literal">Literal</option>
-        <option value="variable">Variable</option>
-        <option value="random">Random 🎲</option>
-        <option value="boundary">Boundary</option>
-      </select>
+    <div className="row wrap" style={{ alignItems: "flex-end" }}>
+      <div className="mini-field">
+        <span className="mini-label">{label}</span>
+        <select
+          aria-label={label}
+          value={kind}
+          onChange={(e) => {
+            const newKind = e.target.value as TestValue["kind"];
+            if (newKind === "literal") onChange({ kind: "literal", value: "" });
+            else if (newKind === "variable") onChange({ kind: "variable", path: "base_url" });
+            else if (newKind === "random") onChange({ kind: "random", generator: "fullName", seedOnce: true });
+            else onChange({ kind: "boundary", boundary: "empty" });
+          }}
+        >
+          <option value="literal">Literal</option>
+          <option value="variable">Variable</option>
+          <option value="random">Random 🎲</option>
+          <option value="boundary">Boundary</option>
+        </select>
+      </div>
 
       {value?.kind === "literal" && (
-        <input value={value.value} onChange={(e) => onChange({ kind: "literal", value: e.target.value })} placeholder="value" />
+        <div className="mini-field">
+          <span className="mini-label">Literal Text</span>
+          <input aria-label="Literal value" value={value.value} onChange={(e) => onChange({ kind: "literal", value: e.target.value })} placeholder="value" />
+        </div>
       )}
 
       {value?.kind === "variable" && (
-        <input
-          value={value.path}
-          onChange={(e) => onChange({ kind: "variable", path: e.target.value })}
-          placeholder="base_url / credentials.default.password"
-          list="variable-suggestions"
-        />
+        <div className="mini-field">
+          <span className="mini-label">Variable Path</span>
+          <input
+            aria-label="Variable path"
+            value={value.path}
+            onChange={(e) => onChange({ kind: "variable", path: e.target.value })}
+            placeholder="base_url / credentials.default.password"
+            list="variable-suggestions"
+          />
+        </div>
       )}
 
       {value?.kind === "random" && (
         <>
-          <select value={value.generator} onChange={(e) => onChange({ ...value, generator: e.target.value as typeof value.generator })}>
-            {RANDOM_GENERATORS.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, textTransform: "none", fontWeight: 400 }}>
+          <div className="mini-field">
+            <span className="mini-label">Generator</span>
+            <select
+              aria-label="Random data generator"
+              value={value.generator}
+              onChange={(e) => onChange({ ...value, generator: e.target.value as typeof value.generator })}
+            >
+              {RANDOM_GENERATORS.map((g) => (
+                <option key={g} value={g}>
+                  {g}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, textTransform: "none", fontWeight: 400, paddingBottom: 9 }}>
             <input
               type="checkbox"
               style={{ width: "auto" }}
@@ -260,13 +310,20 @@ export function ValueEditor({ value, onChange }: { value: TestValue | undefined;
 
       {value?.kind === "boundary" && (
         <>
-          <select value={value.boundary} onChange={(e) => onChange({ kind: "boundary", boundary: e.target.value as typeof value.boundary })}>
-            {BOUNDARY_KINDS.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
+          <div className="mini-field">
+            <span className="mini-label">Boundary Case</span>
+            <select
+              aria-label="Boundary value case"
+              value={value.boundary}
+              onChange={(e) => onChange({ kind: "boundary", boundary: e.target.value as typeof value.boundary })}
+            >
+              {BOUNDARY_KINDS.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </div>
           <span className="mono muted">{generateBoundaryValue(value.boundary).slice(0, 40)}</span>
         </>
       )}

@@ -1,4 +1,5 @@
 import migration001 from "./001_init.sql?raw";
+import migration002 from "./002_test_case_delete.sql?raw";
 
 export interface Migration {
   id: string;
@@ -6,4 +7,7 @@ export interface Migration {
 }
 
 /** Ordered list of migrations, applied once each and tracked in schema_migrations. */
-export const migrations: Migration[] = [{ id: "001_init", sql: migration001 }];
+export const migrations: Migration[] = [
+  { id: "001_init", sql: migration001 },
+  { id: "002_test_case_delete", sql: migration002 },
+];

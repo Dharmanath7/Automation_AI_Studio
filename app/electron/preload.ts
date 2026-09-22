@@ -30,6 +30,8 @@ const api: StudioApi = {
   environments: {
     list: (projectId) => invoke("environments:list", { projectId }),
     create: (input) => invoke("environments:create", { input }),
+    setCredentialProfile: (environmentId, credentialProfileId) =>
+      invoke("environments:setCredentialProfile", { environmentId, credentialProfileId }),
   },
   credentials: {
     listProfiles: (projectId) => invoke("credentials:listProfiles", { projectId }),
@@ -43,6 +45,7 @@ const api: StudioApi = {
     create: (input) => invoke("testCases:create", { input }),
     get: (id) => invoke("testCases:get", { id }),
     saveModel: (testCaseId, model) => invoke("testCases:saveModel", { testCaseId, model }),
+    delete: (id) => invoke("testCases:delete", { id }),
   },
   codegen: {
     generate: (testCaseId, forcePaths) => invoke("codegen:generate", { testCaseId, forcePaths }),

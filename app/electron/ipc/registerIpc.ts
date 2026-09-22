@@ -4,7 +4,7 @@ import { getDb } from "../db";
 import { validateSession, createSession, destroySession, type SessionUser } from "../services/sessionService";
 import { login, changePassword } from "../services/authService";
 import { createProject, listProjects, getProject } from "../services/projectService";
-import { createEnvironment, listEnvironments } from "../services/environmentService";
+import { createEnvironment, listEnvironments, setDefaultCredentialProfile } from "../services/environmentService";
 import {
   createCredentialProfile,
   listCredentialProfiles,
@@ -12,7 +12,7 @@ import {
   listCredentialFields,
   deleteCredentialProfile,
 } from "../services/credentialService";
-import { createTestCase, listTestCases, getTestCase, saveTestModel } from "../services/testCaseService";
+import { createTestCase, listTestCases, getTestCase, saveTestModel, deleteTestCase } from "../services/testCaseService";
 import { PlaywrightPythonPytestGenerator } from "../services/codegen/adapters/PlaywrightPythonPytestGenerator";
 import { writeGeneratedCode, getAutomationMapping, readProjectFile } from "../services/codegen/generationService";
 import { runExecution, listExecutions, getExecution } from "../services/execution/executionService";
@@ -109,6 +109,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   // ---- Environments --------------------------------------------------------
   handleAuthed("environments:list", schemas.environmentsListSchema, ({ projectId }) => listEnvironments(getDb(), projectId));
   handleAuthed("environments:create", schemas.environmentsCreateSchema, ({ input }) => createEnvironment(getDb(), input));
+  handleAuthed("environments:setCredentialProfile", schemas.environmentsSetCredentialProfileSchema, ({ environmentId, credentialProfileId }) =>
+    setDefaultCredentialProfile(getDb(), environmentId, credentialProfileId)
+  );
 
   // ---- Credential Vault ------------------------------------------------------
   handleAuthed("credentials:listProfiles", schemas.credentialsListProfilesSchema, ({ projectId }) =>
@@ -133,6 +136,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   handleAuthed("testCases:list", schemas.testCasesListSchema, ({ projectId }) => listTestCases(getDb(), projectId));
   handleAuthed("testCases:create", schemas.testCasesCreateSchema, ({ input }) => createTestCase(getDb(), input));
   handleAuthed("testCases:get", schemas.testCasesGetSchema, ({ id }) => getTestCase(getDb(), id));
+  handleAuthed("testCases:delete", schemas.testCasesDeleteSchema, ({ id }) => {
+    deleteTestCase(getDb(), id);
+    return { deleted: true };
+  });
   handleAuthed("testCases:saveModel", schemas.testCasesSaveModelSchema, ({ testCaseId, model }) => {
     const db = getDb();
     const knownBaseUrls = listEnvironments(db, model.projectId).map((e) => e.baseUrl);

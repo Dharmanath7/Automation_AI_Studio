@@ -99,6 +99,11 @@ export interface StudioApi {
     stop(recordingId: string): Promise<Envelope<{ steps: TestStep[] }>>;
     onEvent(cb: (event: RecorderEvent) => void): () => void;
   };
+  /** The recorder companion toolbar window's own, unauthenticated actions — see registerIpc.ts. */
+  recorderToolbar: {
+    requestStop(recordingId: string): Promise<Envelope<{ recordingId: string }>>;
+    insertRandomValue(recordingId: string): Promise<Envelope<{ ok: boolean; reason?: string }>>;
+  };
   analytics: {
     dashboard(projectId: string): Promise<Envelope<DashboardAnalytics>>;
   };

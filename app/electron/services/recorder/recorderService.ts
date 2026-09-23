@@ -13,13 +13,19 @@ export type RecorderBrowser = "chrome" | "chromium" | "firefox" | "edge";
 export type RecorderEvent =
   | { type: "step"; step: TestStep }
   | { type: "closed" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  // Sent when "Stop Recording" is clicked in the companion toolbar window
+  // rather than in the main Studio window — the main window isn't otherwise
+  // aware that happened, so this tells its Record Browser page to run
+  // exactly the same stop flow as if its own Stop button had been clicked.
+  | { type: "externalStopRequested" };
 
 interface RecordedAction {
   kind: "click" | "dblclick" | "select" | "check" | "uncheck" | "fill" | "hover";
   locator: LocatorCandidate;
   value?: string;
   isPassword?: boolean;
+  isRandom?: boolean;
 }
 
 interface RecordingSession {
@@ -28,6 +34,12 @@ interface RecordingSession {
   context: BrowserContext;
   steps: TestStep[];
   onEvent: (e: RecorderEvent) => void;
+  /** The page/tab most recently interacted with (any recorded action, or a
+   *  newly opened tab) — the best available proxy for "what the person
+   *  recording is currently looking at," since Playwright has no concept of
+   *  OS-level window/tab focus. Used to target "Insert Random Value" from
+   *  the companion toolbar at the right page. */
+  activePage: Page;
 }
 
 const sessions = new Map<string, RecordingSession>();
@@ -78,6 +90,13 @@ function toTestStep(action: RecordedAction): TestStep | null {
           enabled: true,
           note: "Password field — value not recorded; references the Credential Vault instead.",
         };
+      }
+      // Inserted via the recorder toolbar's "Insert Random Value" instead
+      // of typed by hand — record it as a random-value fill (the generator
+      // regenerates a fresh value on every future run) rather than baking
+      // in the one preview value that happened to be shown while recording.
+      if (action.isRandom) {
+        return { id, type: "fill", target, value: { kind: "random", generator: "randomString", seedOnce: false }, enabled: true };
       }
       return { id, type: "fill", target, value: { kind: "literal", value: action.value ?? "" }, enabled: true };
     default:
@@ -168,19 +187,29 @@ export async function startRecording(opts: StartRecordingOptions): Promise<strin
   const context = await browser.newContext({ viewport: null });
   const sessionId = uuidv4();
   const steps: TestStep[] = [];
-  const session: RecordingSession = { id: sessionId, browser, context, steps, onEvent: opts.onEvent };
-  sessions.set(sessionId, session);
+  // Assigned its real value once the first page exists, just below —
+  // exposeBinding's callback only ever actually runs later, once the user
+  // interacts with that page, by which point this closure variable has
+  // already been reassigned to the real session object.
+  let session: RecordingSession;
 
   function pushStep(step: TestStep) {
     steps.push(step);
     opts.onEvent({ type: "step", step });
   }
 
-  await context.exposeBinding("__aasRecordEvent", async (_source, action: RecordedAction) => {
+  await context.exposeBinding("__aasRecordEvent", async (source, action: RecordedAction) => {
+    session.activePage = source.page;
     const step = toTestStep(action);
     if (step) pushStep(step);
   });
   await context.addInitScript(RECORDER_INIT_SCRIPT);
+  // Same reasoning as the generated conftest.py's page fixture: an
+  // unhandled dialog (most commonly a "leave site?" beforeunload prompt)
+  // blocks the page it appeared on indefinitely, which during recording
+  // means the recorded browser looks frozen and "Stop Recording" can't
+  // close it until the dialog is dealt with by hand.
+  context.on("dialog", (dialog) => void dialog.accept());
 
   // Tracks top-level navigation on one page as "navigate" steps. `skipFirst`
   // is used for a newly opened tab: its first "navigation" is just the
@@ -205,14 +234,19 @@ export async function startRecording(opts: StartRecordingOptions): Promise<strin
   }
 
   const page = await context.newPage();
+  session = { id: sessionId, browser, context, steps, onEvent: opts.onEvent, activePage: page };
+  sessions.set(sessionId, session);
   attachNavigationTracking(page, false);
 
   // A click/tap that opens a link in a new tab (target="_blank", ctrl-click,
   // window.open, ...) creates a new Page on the context. Record it as a
   // "newTab" step — the code generator absorbs it into the click
   // immediately before it — and keep tracking navigation on the new tab too,
-  // since it's now where the user's subsequent actions will happen.
+  // since it's now where the user's subsequent actions will happen. It also
+  // becomes the active page immediately, matching a real browser: opening a
+  // new tab switches focus to it.
   context.on("page", (newPage) => {
+    session.activePage = newPage;
     pushStep({ id: uuidv4(), type: "newTab", enabled: true });
     attachNavigationTracking(newPage, true);
   });
@@ -254,4 +288,24 @@ export async function stopRecording(sessionId: string): Promise<TestStep[]> {
 
 export function isRecording(sessionId: string): boolean {
   return sessions.has(sessionId);
+}
+
+/**
+ * Fills the currently-focused field on the recording's active page/tab with
+ * a random preview value and records it as a random-value fill step — the
+ * companion toolbar window's "Insert Random Value" button, for when there's
+ * no on-the-fly random-value generator otherwise available while recording.
+ * Returns false (with a reason) if there's no focused, fillable field to
+ * target, so the toolbar can show that instead of silently doing nothing.
+ */
+export async function insertRandomValue(sessionId: string): Promise<{ ok: boolean; reason?: string }> {
+  const session = sessions.get(sessionId);
+  if (!session) return { ok: false, reason: "Recording session not found — it may have already been stopped." };
+  // A string, not a TS closure: this runs in the recorded page's browser
+  // context, which has no relation to this file's own (Node/no-DOM-lib)
+  // type-checking environment.
+  const result = (await session.activePage.evaluate(
+    "window.__aasInsertRandomValue ? window.__aasInsertRandomValue() : { ok: false, reason: 'Recorder script not ready on this page yet.' }"
+  )) as { ok: boolean; reason?: string };
+  return result;
 }

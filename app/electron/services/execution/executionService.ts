@@ -8,7 +8,8 @@ import { getProject } from "../projectService";
 import { getEnvironment } from "../environmentService";
 import { getDecryptedCredentials, listCredentialProfiles } from "../credentialService";
 import { getTestCase } from "../testCaseService";
-import { getAutomationMapping } from "../codegen/generationService";
+import { getAutomationMapping, writeGeneratedCode } from "../codegen/generationService";
+import { PlaywrightPythonPytestGenerator } from "../codegen/adapters/PlaywrightPythonPytestGenerator";
 
 export type TriggerType = "single" | "suite" | "bvt" | "smoke" | "sanity" | "regression" | "custom";
 
@@ -40,7 +41,29 @@ export async function runExecution(
 
   const testCases = request.testCaseIds.map((id) => getTestCase(db, id)).filter((t): t is NonNullable<typeof t> => !!t);
   const filePaths: string[] = [];
+  const staleCodeWarnings: string[] = [];
   for (const tc of testCases) {
+    // Regenerate from the test case's current saved model before running it,
+    // every time — otherwise "Run" silently executes whatever .py file was
+    // last generated, which is stale the moment someone edits a step (e.g.
+    // a random-value field's generator/lock setting) without remembering to
+    // click "Generate Code" again first. A file the user has hand-edited
+    // outside the Studio is left exactly as it is — writeGeneratedCode
+    // reports a conflict instead of silently overwriting it — and that
+    // existing mapping is used as a fallback so the run still proceeds.
+    const generated = PlaywrightPythonPytestGenerator.generate(tc.testModel, {
+      projectDirectory: project.projectDirectory,
+      projectCode: project.code,
+      existingPageObjectNames: [],
+    });
+    const outcome = writeGeneratedCode(db, project, tc.id, generated);
+    if (outcome.conflicts.length > 0) {
+      staleCodeWarnings.push(
+        `${tc.testModel.name}: running the existing file(s) on disk unchanged — ${outcome.conflicts
+          .map((c) => c.relativePath)
+          .join(", ")} ${outcome.conflicts.length > 1 ? "have" : "has"} been edited outside the Studio, so recent changes to this test case's steps were NOT applied to it.`
+      );
+    }
     const mapping = getAutomationMapping(db, tc.id);
     if (mapping) filePaths.push(mapping.generatedTestFile);
   }
@@ -60,6 +83,10 @@ export async function runExecution(
     `INSERT INTO executions (id, project_id, environment_id, browser_config_id, trigger_type, build_id, mode, status, started_at, triggered_by_user_id)
      VALUES (?, ?, ?, NULL, ?, ?, ?, 'running', ?, ?)`
   ).run(executionId, project.id, environment.id, request.triggerType, request.buildId ?? null, request.mode, startedAt, request.triggeredByUserId);
+
+  for (const warning of staleCodeWarnings) {
+    onEvent?.({ type: "log", stream: "stderr", chunk: `[Automation AI Studio] ${warning}\n` });
+  }
 
   try {
     const result = await PythonExecutionAdapter.run(

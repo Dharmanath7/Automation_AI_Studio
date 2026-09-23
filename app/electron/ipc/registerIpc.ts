@@ -1,4 +1,5 @@
-import { ipcMain, dialog, type BrowserWindow } from "electron";
+import path from "node:path";
+import { ipcMain, dialog, BrowserWindow, screen } from "electron";
 import type { z } from "zod";
 import { getDb } from "../db";
 import { validateSession, createSession, destroySession, type SessionUser } from "../services/sessionService";
@@ -17,7 +18,7 @@ import { PlaywrightPythonPytestGenerator } from "../services/codegen/adapters/Pl
 import { writeGeneratedCode, getAutomationMapping, readProjectFile } from "../services/codegen/generationService";
 import { runExecution, listExecutions, getExecution } from "../services/execution/executionService";
 import { checkAndCacheRuntime, getLastRuntimeCheck } from "../services/runtimeService";
-import { startRecording, stopRecording } from "../services/recorder/recorderService";
+import { startRecording, stopRecording, insertRandomValue } from "../services/recorder/recorderService";
 import { getDashboardAnalytics } from "../services/analyticsService";
 import { getLogger } from "../services/logger";
 import type { TestModel } from "../shared/testModel";
@@ -201,18 +202,92 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   );
 
   // ---- Browser recorder ----------------------------------------------------
+  // The recorder toolbar is a small always-on-top companion window shown
+  // alongside the recorded browser, so "Stop Recording" and "Insert Random
+  // Value" are reachable without alt-tabbing back to the main Studio window
+  // (which, while a real browser is being recorded in the foreground, is
+  // otherwise out of sight). It's created fresh per recording session and
+  // closed whenever that session ends, however it ends.
+  let toolbarWindow: BrowserWindow | null = null;
+  const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+
+  function closeToolbarWindow(): void {
+    if (toolbarWindow && !toolbarWindow.isDestroyed()) toolbarWindow.close();
+    toolbarWindow = null;
+  }
+
+  async function openToolbarWindow(recordingId: string): Promise<void> {
+    closeToolbarWindow();
+    const { workArea } = screen.getPrimaryDisplay();
+    const width = 280;
+    const height = 230;
+    toolbarWindow = new BrowserWindow({
+      width,
+      height,
+      useContentSize: true,
+      x: workArea.x + workArea.width - width - 16,
+      y: workArea.y + 16,
+      alwaysOnTop: true,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: "Recorder Controls",
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    const hash = `/recorder-toolbar?recordingId=${encodeURIComponent(recordingId)}`;
+    if (VITE_DEV_SERVER_URL) {
+      await toolbarWindow.loadURL(`${VITE_DEV_SERVER_URL}#${hash}`);
+    } else {
+      await toolbarWindow.loadFile(path.join(__dirname, "../dist/index.html"), { hash });
+    }
+    toolbarWindow.on("closed", () => {
+      toolbarWindow = null;
+    });
+  }
+
   handleAuthed("recorder:start", schemas.recorderStartSchema, async ({ baseUrl, browser }) => {
     const recordingId = await startRecording({
       baseUrl,
       browser,
-      onEvent: (event) => mainWindow.webContents.send("recorder:event", event),
+      onEvent: (event) => {
+        mainWindow.webContents.send("recorder:event", event);
+        if (event.type === "closed") closeToolbarWindow();
+      },
     });
+    await openToolbarWindow(recordingId);
     return { recordingId };
   });
   handleAuthed("recorder:stop", schemas.recorderStopSchema, async ({ recordingId }) => {
     const steps = await stopRecording(recordingId);
+    closeToolbarWindow();
     return { steps };
   });
+
+  // ---- Recorder toolbar (companion window) --------------------------------
+  // Unauthenticated by design, not oversight: these two actions only ever
+  // operate on a `recordingId` that is (a) an unguessable server-generated
+  // UUID and (b) only meaningful at all while that specific recording
+  // session is live in memory — there is nothing to look up or mutate for
+  // any other value. Requiring the toolbar window to separately carry and
+  // present a full login session for this would add real complexity (each
+  // Electron BrowserWindow's preload has its own isolated JS context, so a
+  // session token would have to be explicitly handed to it) for no
+  // corresponding security benefit; it's the same reasoning already applied
+  // to the aas-artifact:// lookup in main.ts.
+  handlePublic("recorderToolbar:requestStop", schemas.recorderToolbarActionSchema, ({ recordingId }) => {
+    mainWindow.webContents.send("recorder:event", { type: "externalStopRequested" });
+    return { recordingId };
+  });
+  handlePublic("recorderToolbar:insertRandomValue", schemas.recorderToolbarActionSchema, async ({ recordingId }) =>
+    insertRandomValue(recordingId)
+  );
 
   // ---- Native dialogs ---------------------------------------------------
   handleAuthed("dialog:selectDirectory", schemas.authMeSchema, async () => {

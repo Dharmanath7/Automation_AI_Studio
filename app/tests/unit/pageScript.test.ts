@@ -125,4 +125,52 @@ describe("RECORDER_INIT_SCRIPT", () => {
       expect(document.querySelectorAll(locator.value)[0]).toBe(targetRow);
     });
   });
+
+  describe("__aasInsertRandomValue (recorder toolbar's 'Insert Random Value')", () => {
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    function install() {
+      type InsertRandomValueFn = () => { ok: boolean; reason?: string };
+      return (window as unknown as { __aasInsertRandomValue: InsertRandomValueFn }).__aasInsertRandomValue;
+    }
+
+    it("fails clearly when nothing is focused", () => {
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      input.blur();
+      const result = install()();
+      expect(result.ok).toBe(false);
+    });
+
+    it("fails clearly when the focused element isn't a fillable text field (e.g. a checkbox)", () => {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      document.body.appendChild(checkbox);
+      checkbox.focus();
+      const result = install()();
+      expect(result.ok).toBe(false);
+    });
+
+    it("fills the focused text field with a garbage-looking value and records it as a random (not literal) fill step, without double-recording via the change listener", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      document.body.appendChild(input);
+      input.focus();
+
+      const events: { kind: string; value?: string; isRandom?: boolean }[] = [];
+      // @ts-expect-error test-only stub of the binding recorderService.ts normally exposes via Playwright's exposeBinding
+      window.__aasRecordEvent = (action: { kind: string; value?: string; isRandom?: boolean }) => events.push(action);
+
+      const result = install()();
+
+      expect(result.ok).toBe(true);
+      expect(input.value).toMatch(/^[a-z]{8,13}\d{2,4}$/);
+      expect(events).toHaveLength(1);
+      expect(events[0].kind).toBe("fill");
+      expect(events[0].isRandom).toBe(true);
+      expect(events[0].value).toBe(input.value);
+    });
+  });
 });

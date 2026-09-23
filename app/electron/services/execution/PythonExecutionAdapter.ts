@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -15,6 +15,32 @@ function resolvePythonExecutable(projectDirectory: string): string {
   const venvPython = path.join(projectDirectory, ".venv", "Scripts", "python.exe");
   if (fs.existsSync(venvPython)) return venvPython;
   return "python";
+}
+
+/**
+ * Kills a process and its whole descendant tree — plain child.kill() on
+ * Windows only signals the immediate pytest/python.exe process, not the
+ * Playwright driver or browser processes it spawned, which is exactly the
+ * "the browser doesn't close on its own" failure mode: something downstream
+ * (most commonly an unhandled dialog — see the generated conftest.py's page
+ * fixture) hangs test teardown, pytest itself never exits, and without this
+ * the run would sit there forever rather than being reported as a clear,
+ * actionable timeout.
+ */
+function killProcessTree(pid: number): void {
+  if (process.platform === "win32") {
+    execFile("taskkill", ["/pid", String(pid), "/T", "/F"], () => {});
+  } else {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Process likely already gone — nothing further to do.
+      }
+    }
+  }
 }
 
 function runCommand(exe: string, args: string[], cwd: string): Promise<{ stdout: string; stderr: string; code: number | null }> {
@@ -165,10 +191,30 @@ export const PythonExecutionAdapter: ExecutionAdapter = {
       onEvent({ type: "log", stream: "stderr", chunk });
     });
 
+    // A hard ceiling on the whole run, independent of Playwright's own
+    // per-action timeout (env.timeout_ms) — that budget only ever applies to
+    // individual actions/assertions, so it does nothing to bound a process
+    // that's hanging somewhere else entirely (teardown, an unhandled
+    // dialog, a wedged browser process). Without this, that kind of hang
+    // blocks the run forever instead of failing cleanly, and — for a suite
+    // — blocks every test queued after it too, since pytest itself never
+    // reaches them. 3 minutes/test is generous for headed runs against a
+    // real, possibly slow, application; overridable for unusual cases.
+    const timeoutMs = Number(process.env.AAS_EXECUTION_TIMEOUT_MS) || Math.max(180_000, request.testFilePaths.length * 180_000);
+    let timedOut = false;
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      const msg = `\n[Automation AI Studio] Execution exceeded its ${Math.round(timeoutMs / 1000)}s timeout and was terminated — the browser or test process did not finish/close on its own (a common cause is an unhandled dialog blocking teardown). Increase AAS_EXECUTION_TIMEOUT_MS if this test genuinely needs more time.\n`;
+      stderr += msg;
+      onEvent({ type: "log", stream: "stderr", chunk: msg });
+      if (child.pid) killProcessTree(child.pid);
+    }, timeoutMs);
+
     const exitCode: number | null = await new Promise((resolve) => {
       child.on("error", () => resolve(-1));
       child.on("close", (code) => resolve(code));
     });
+    clearTimeout(timeoutHandle);
 
     const finishedAt = new Date().toISOString();
     const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
@@ -209,7 +255,7 @@ export const PythonExecutionAdapter: ExecutionAdapter = {
     const anyFailed = tests.some((t) => t.status === "failed" || t.status === "errored");
     const allFailed = tests.length > 0 && tests.every((t) => t.status === "failed" || t.status === "errored");
     const status: ExecutionResult["status"] =
-      tests.length === 0 && exitCode !== 0
+      timedOut || (tests.length === 0 && exitCode !== 0)
         ? "errored"
         : allFailed
           ? "failed"

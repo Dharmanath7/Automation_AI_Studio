@@ -7,6 +7,12 @@ async function invoke<T>(channel: string, payload: Record<string, unknown> = {})
   return ipcRenderer.invoke(channel, { sessionId, ...payload }) as Promise<Envelope<T>>;
 }
 
+// No sessionId — for the recorder toolbar window's unauthenticated actions
+// only (see the comment on their handlers in registerIpc.ts).
+async function invokePublic<T>(channel: string, payload: Record<string, unknown> = {}): Promise<Envelope<T>> {
+  return ipcRenderer.invoke(channel, payload) as Promise<Envelope<T>>;
+}
+
 const api: StudioApi = {
   auth: {
     async login(username, password, rememberMe) {
@@ -81,6 +87,10 @@ const api: StudioApi = {
       ipcRenderer.on("recorder:event", listener);
       return () => ipcRenderer.removeListener("recorder:event", listener);
     },
+  },
+  recorderToolbar: {
+    requestStop: (recordingId) => invokePublic("recorderToolbar:requestStop", { recordingId }),
+    insertRandomValue: (recordingId) => invokePublic("recorderToolbar:insertRandomValue", { recordingId }),
   },
   analytics: {
     dashboard: (projectId) => invoke("analytics:dashboard", { projectId }),

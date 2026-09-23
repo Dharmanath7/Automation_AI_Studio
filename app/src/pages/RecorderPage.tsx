@@ -18,7 +18,6 @@ export default function RecorderPage() {
 
   const [phase, setPhase] = useState<Phase>("configure");
   const [browser, setBrowser] = useState<RecorderBrowser>("chrome");
-  const [recordingId, setRecordingId] = useState<string | null>(null);
   const [liveSteps, setLiveSteps] = useState<TestStep[]>([]);
   const [startError, setStartError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -44,6 +43,13 @@ export default function RecorderPage() {
           setClosedUnexpectedly(true);
           finishRecording();
         }
+      } else if (event.type === "externalStopRequested") {
+        // "Stop Recording" was clicked in the companion toolbar window
+        // instead of here — run the exact same stop flow as this page's
+        // own Stop button. handleStop() is ref-based specifically so this
+        // still works correctly even though this listener was registered
+        // once on mount and never picks up a fresher closure.
+        void handleStop();
       }
     });
     return unsubscribe;
@@ -63,7 +69,6 @@ export default function RecorderPage() {
       return;
     }
     recordingIdRef.current = res.data.recordingId;
-    setRecordingId(res.data.recordingId);
     setPhase("recording");
   }
 
@@ -75,7 +80,6 @@ export default function RecorderPage() {
     setSteps(liveStepsRef.current);
     setPhase("review");
     recordingIdRef.current = null;
-    setRecordingId(null);
   }
 
   // Keep a ref mirror of liveSteps so the "closed" event handler (registered
@@ -86,15 +90,21 @@ export default function RecorderPage() {
   }, [liveSteps]);
 
   async function handleStop() {
-    if (!recordingId) return;
-    const res = await window.studio.recorder.stop(recordingId);
+    // Reads from refs, not the recordingId/liveSteps state closures — this
+    // is called both from the Stop button (fresh closure every render, so
+    // either would work) and from the "externalStopRequested" event
+    // listener above, which was registered once on mount and only ever
+    // sees whatever closure existed at that moment; refs stay current
+    // regardless of which closure is calling.
+    const currentId = recordingIdRef.current;
+    if (!currentId) return;
+    const res = await window.studio.recorder.stop(currentId);
     if (res.ok) {
       setSteps(res.data.steps);
     } else {
-      setSteps(liveSteps);
+      setSteps(liveStepsRef.current);
     }
     recordingIdRef.current = null;
-    setRecordingId(null);
     setPhase("review");
   }
 

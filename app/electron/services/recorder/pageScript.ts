@@ -223,6 +223,51 @@ export const RECORDER_INIT_SCRIPT = `
     }
   }, true);
 
+  // ---- Recorder-toolbar "Insert Random Value" -----------------------
+  // Invoked from the main process (see recorderService.ts's
+  // insertRandomValue()) when the person recording clicks "Insert Random
+  // Value" in the small companion toolbar window instead of typing a real
+  // value into the currently-focused field. Fills it with a garbage-looking
+  // preview value so it's visible immediately, but records the STEP as a
+  // random-value fill (isRandom: true) rather than that literal — the
+  // generated test then calls random_data.random_string() at run time, a
+  // fresh value every run, same as toggling a fill step to "random" by hand
+  // in the Test Editor.
+  function setNativeValue(el, value) {
+    var proto = Object.getPrototypeOf(el);
+    var desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    var setter = desc && desc.set;
+    if (setter) { setter.call(el, value); } else { el.value = value; }
+    // 'input' only (not 'change') — frameworks that track value via the
+    // native setter need this to register it, and our own recorder listens
+    // for 'change' to capture fills, which would double-record this as a
+    // second, literal fill step if we dispatched it too.
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  window.__aasInsertRandomValue = function () {
+    var el = document.activeElement;
+    if (!el || !el.tagName) return { ok: false, reason: 'No field is focused — click into a text field first.' };
+    var tag = el.tagName.toLowerCase();
+    var isTextInput =
+      tag === 'textarea' ||
+      (tag === 'input' && ['checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'password'].indexOf((el.getAttribute('type') || 'text').toLowerCase()) === -1);
+    if (!isTextInput) return { ok: false, reason: 'The focused element is not a text field.' };
+
+    var letters = '';
+    var letterCount = 8 + Math.floor(Math.random() * 6);
+    for (var i = 0; i < letterCount; i++) letters += String.fromCharCode(97 + Math.floor(Math.random() * 26));
+    var digits = '';
+    var digitCount = 2 + Math.floor(Math.random() * 3);
+    for (var j = 0; j < digitCount; j++) digits += String(Math.floor(Math.random() * 10));
+    var previewValue = letters + digits;
+
+    setNativeValue(el, previewValue);
+    flashHighlight(el, 'fill');
+    send({ kind: 'fill', locator: computeLocator(el), value: previewValue, isRandom: true });
+    return { ok: true };
+  };
+
   // ---- Hover recording (dwell-based) --------------------------------
   // Recording a "hover" on every mouseover would fire constantly as the
   // cursor merely crosses the page — instead only record it once the

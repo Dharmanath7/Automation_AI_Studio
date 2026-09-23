@@ -472,6 +472,18 @@ def page(env):
         # the same smart-wait budget automatically.
         context.set_default_timeout(env["timeout_ms"])
         context.set_default_navigation_timeout(env["timeout_ms"])
+        # Auto-accept any dialog (alert/confirm/prompt/beforeunload) on every
+        # page/tab in this context. Without this, a single unexpected dialog
+        # — most commonly a "leave site?" beforeunload prompt triggered by a
+        # navigation-away step — sits there forever: Playwright does not
+        # dismiss dialogs automatically, so it blocks whatever action
+        # triggered it and then blocks context.close()/browser.close() at
+        # teardown too, since a dialog is still open on a page being closed.
+        # From the outside this looks exactly like "the test finished but
+        # the browser doesn't close on its own" — every step ran, then the
+        # run hangs and is eventually reported as failed once the harness's
+        # own timeout kicks in.
+        context.on("dialog", lambda dialog: dialog.accept())
         page = context.new_page()
         yield page
         context.close()

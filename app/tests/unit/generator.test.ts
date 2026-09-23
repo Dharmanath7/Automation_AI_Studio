@@ -181,3 +181,80 @@ describe("PlaywrightPythonPytestGenerator — tab switching", () => {
     expect(page).not.toContain("self.view_details = ");
   });
 });
+
+describe("PlaywrightPythonPytestGenerator — random value regeneration", () => {
+  const ctx = { projectDirectory: "C:/proj", projectCode: "PROJ", existingPageObjectNames: [] };
+
+  function modelWithRandomFill(value: TestModel["steps"][number]["value"]): TestModel {
+    return {
+      schemaVersion: 1,
+      testCaseId: "tc-random",
+      projectId: "proj-1",
+      name: "Create Account",
+      tags: [],
+      steps: [
+        { id: "r1", type: "navigate", value: { kind: "variable", path: "base_url" }, enabled: true },
+        {
+          id: "r2",
+          type: "fill",
+          target: { preferred: { strategy: "role", value: "textbox", roleName: "Username", quality: "excellent" }, alternatives: [] },
+          value,
+          enabled: true,
+        },
+      ],
+    };
+  }
+
+  it("regression: seedOnce=false (the UI default) emits a runtime random_data call, never a baked literal, so every test run gets a fresh value", () => {
+    // This is the root-cause fix for the user report: "the random value...
+    // should add the random value in every test case iteration, not only
+    // once." A baked-in literal here would make every execution reuse the
+    // exact same "random" value forever.
+    const model = modelWithRandomFill({ kind: "random", generator: "randomString", seedOnce: false, generatedValue: "preview-abc123" });
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toContain("random_data.random_string()");
+    expect(page).not.toContain("preview-abc123");
+  });
+
+  it("seedOnce=true bakes the locked-in generatedValue as a literal, for the explicit opt-in 'same value every run' case", () => {
+    const model = modelWithRandomFill({ kind: "random", generator: "email", seedOnce: true, generatedValue: "locked@example.com" });
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toContain('"locked@example.com"');
+    expect(page).not.toContain("random_data.email()");
+  });
+
+  it("seedOnce=true with no generatedValue yet falls back to a runtime call (nothing to bake in)", () => {
+    const model = modelWithRandomFill({ kind: "random", generator: "uuid", seedOnce: true });
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toContain("random_data.uuid()");
+  });
+});
+
+describe("PlaywrightPythonPytestGenerator — hover steps", () => {
+  const ctx = { projectDirectory: "C:/proj", projectCode: "PROJ", existingPageObjectNames: [] };
+
+  it("generates a real .hover() call for a recorded hover step (the recorder's own CSS-:hover-rule detection was separately broken by a template-literal escaping bug — see pageScript.test.ts — but the code generator's own hover handling was correct throughout, so this pins that down explicitly)", () => {
+    const model: TestModel = {
+      schemaVersion: 1,
+      testCaseId: "tc-hover",
+      projectId: "proj-1",
+      name: "Hover Reveal",
+      tags: [],
+      steps: [
+        { id: "h1", type: "navigate", value: { kind: "variable", path: "base_url" }, enabled: true },
+        {
+          id: "h2",
+          type: "hover",
+          target: { preferred: { strategy: "css", value: ".figure", quality: "fragile" }, alternatives: [] },
+          enabled: true,
+        },
+      ],
+    };
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toMatch(/self\.\w+\.hover\(\)/);
+  });
+});

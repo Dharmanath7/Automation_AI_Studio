@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import { STEP_TYPES, type TestStep, type TestModel } from "@shared/testModel";
-import type { AutomationMapping, WriteOutcome } from "@shared/ipcApi";
+import type { AutomationMapping, WriteOutcome, RecorderBrowser } from "@shared/ipcApi";
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, newStep } from "@/components/StepEditor";
 import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { EXECUTION_BROWSER_OPTIONS } from "@/lib/browserOptions";
 
 export default function TestEditorPage() {
   const { testCaseId } = useParams();
@@ -31,7 +32,7 @@ export default function TestEditorPage() {
   const [mapping, setMapping] = useState<AutomationMapping | null>(null);
   const [codeView, setCodeView] = useState<{ path: string; content: string } | null>(null);
 
-  const [browser, setBrowser] = useState<"chrome" | "chromium">("chrome");
+  const [browser, setBrowser] = useState<RecorderBrowser>("chrome");
   const [mode, setMode] = useState<"headed" | "headless">("headless");
   const [runResult, setRunResult] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -320,9 +321,12 @@ export default function TestEditorPage() {
         <div className="row wrap" style={{ alignItems: "flex-end" }}>
           <div className="mini-field">
             <span className="mini-label">Browser</span>
-            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-              <option value="chrome">Chrome</option>
-              <option value="chromium">Chromium</option>
+            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as RecorderBrowser)}>
+              {EXECUTION_BROWSER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="mini-field">

@@ -148,6 +148,6 @@ export const analyticsDashboardSchema = z.object({ ...sessionField, projectId: z
 export const recorderStartSchema = z.object({
   ...sessionField,
   baseUrl: z.string().min(1),
-  browser: z.enum(["chrome", "chromium"]),
+  browser: z.enum(["chrome", "chromium", "firefox", "edge"]),
 });
 export const recorderStopSchema = z.object({ ...sessionField, recordingId: z.string().min(1) });

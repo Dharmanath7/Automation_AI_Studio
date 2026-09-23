@@ -1,10 +1,14 @@
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import { chromium, firefox, type Browser, type BrowserContext, type Page } from "playwright";
+import { screen } from "electron";
 import { v4 as uuidv4 } from "uuid";
 import type { TestStep, LocatorCandidate, LocatorQuality, LocatorStrategy } from "../../shared/testModel";
 import { RECORDER_INIT_SCRIPT } from "./pageScript";
 import { getLogger } from "../logger";
+import { resolveChromiumExecutable, resolveFirefoxExecutable } from "./browserResolver";
 
 const logger = getLogger("recorder");
+
+export type RecorderBrowser = "chrome" | "chromium" | "firefox" | "edge";
 
 export type RecorderEvent =
   | { type: "step"; step: TestStep }
@@ -12,7 +16,7 @@ export type RecorderEvent =
   | { type: "error"; message: string };
 
 interface RecordedAction {
-  kind: "click" | "dblclick" | "select" | "check" | "uncheck" | "fill";
+  kind: "click" | "dblclick" | "select" | "check" | "uncheck" | "fill" | "hover";
   locator: LocatorCandidate;
   value?: string;
   isPassword?: boolean;
@@ -53,6 +57,8 @@ function toTestStep(action: RecordedAction): TestStep | null {
       return { id, type: "click", target, enabled: true };
     case "dblclick":
       return { id, type: "doubleClick", target, enabled: true };
+    case "hover":
+      return { id, type: "hover", target, enabled: true };
     case "check":
       return { id, type: "check", target, enabled: true };
     case "uncheck":
@@ -81,30 +87,85 @@ function toTestStep(action: RecordedAction): TestStep | null {
 
 export interface StartRecordingOptions {
   baseUrl: string;
-  browser: "chrome" | "chromium";
+  browser: RecorderBrowser;
   onEvent: (e: RecorderEvent) => void;
 }
 
-export async function startRecording(opts: StartRecordingOptions): Promise<string> {
-  const debugPort = process.env.AAS_RECORDER_DEBUG_PORT;
-  const launchOptions = {
-    ...(opts.browser === "chrome" ? { channel: "chrome" as const } : {}),
-    headless: false,
-    ...(debugPort ? { args: [`--remote-debugging-port=${debugPort}`] } : {}),
-  };
+/** The primary display's usable area, for launching the recorder maximized instead of at Playwright's small default size. */
+function primaryWorkArea(): { width: number; height: number } {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  return { width, height };
+}
 
-  let browser: Browser;
-  try {
-    browser = await chromium.launch(launchOptions);
-  } catch (err) {
-    throw new Error(
-      opts.browser === "chromium"
-        ? "Chromium isn't installed for the Studio's recorder. Use Chrome instead, or run 'npx playwright install chromium' in app/."
-        : `Failed to launch Chrome: ${err instanceof Error ? err.message : String(err)}`
-    );
+async function launchBrowser(opts: StartRecordingOptions): Promise<Browser> {
+  const debugPort = process.env.AAS_RECORDER_DEBUG_PORT;
+  const { width, height } = primaryWorkArea();
+  const debugArgs = debugPort ? [`--remote-debugging-port=${debugPort}`] : [];
+
+  if (opts.browser === "firefox") {
+    const executablePath = resolveFirefoxExecutable();
+    if (!executablePath) {
+      throw new Error(
+        "Firefox isn't installed for the Studio's recorder. Run 'npx playwright install firefox' in app/, or pick Chrome/Edge instead."
+      );
+    }
+    // Firefox has no "start maximized" flag; approximate it by sizing the
+    // window to the screen's usable area up front.
+    return firefox.launch({
+      headless: false,
+      executablePath,
+      args: [...debugArgs, `-width`, String(width), `-height`, String(height)],
+    });
   }
 
-  const context = await browser.newContext();
+  // Chrome / Edge use the system-installed browser via Playwright's
+  // "channel" mechanism — no separate download, and the most reliable path
+  // since it's exactly the browser already on this machine.
+  if (opts.browser === "chrome" || opts.browser === "edge") {
+    const channel = opts.browser === "chrome" ? "chrome" : "msedge";
+    try {
+      return await chromium.launch({
+        channel,
+        headless: false,
+        args: ["--start-maximized", ...debugArgs],
+      });
+    } catch (err) {
+      throw new Error(
+        opts.browser === "chrome"
+          ? `Failed to launch Chrome: ${err instanceof Error ? err.message : String(err)}`
+          : `Failed to launch Microsoft Edge: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
+  // Plain "chromium" — Playwright's own bundled build. Prefer whatever
+  // revision is actually installed (see browserResolver.ts) over only
+  // trusting the exact pin, which is what made this report "not installed"
+  // even when a perfectly usable Chromium was already on disk.
+  const executablePath = resolveChromiumExecutable();
+  try {
+    return await chromium.launch({
+      ...(executablePath ? { executablePath } : {}),
+      headless: false,
+      args: ["--start-maximized", ...debugArgs],
+    });
+  } catch (err) {
+    throw new Error(
+      `Chromium isn't installed for the Studio's recorder (${err instanceof Error ? err.message : String(err)}). ` +
+        `Run 'npx playwright install chromium' in app/, or pick Chrome/Edge instead — those use the browser already on this machine.`
+    );
+  }
+}
+
+export async function startRecording(opts: StartRecordingOptions): Promise<string> {
+  const browser = await launchBrowser(opts);
+
+  // viewport: null makes the page fill whatever size the OS window actually
+  // is (maximized) instead of Playwright emulating a fixed small viewport
+  // inside a maximized chrome — without this, "--start-maximized" only
+  // maximizes the window frame while the page content still renders at
+  // Playwright's 1280x720 default.
+  const context = await browser.newContext({ viewport: null });
   const sessionId = uuidv4();
   const steps: TestStep[] = [];
   const session: RecordingSession = { id: sessionId, browser, context, steps, onEvent: opts.onEvent };

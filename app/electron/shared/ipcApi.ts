@@ -9,7 +9,7 @@ import type { Environment, CreateEnvironmentInput } from "../services/environmen
 import type { CredentialProfile, CredentialFieldSummary } from "../services/credentialService";
 import type { TestCase, CreateTestCaseInput } from "../services/testCaseService";
 import type { TestModel, TestStep } from "./testModel";
-import type { RecorderEvent } from "../services/recorder/recorderService";
+import type { RecorderEvent, RecorderBrowser } from "../services/recorder/recorderService";
 import type { DashboardAnalytics } from "../services/analyticsService";
 import type { WriteOutcome, AutomationMapping } from "../services/codegen/generationService";
 import type { RunRequest, ExecutionSummary, ExecutionDetail } from "../services/execution/executionService";
@@ -95,7 +95,7 @@ export interface StudioApi {
     selectDirectory(): Promise<Envelope<{ path: string | null }>>;
   };
   recorder: {
-    start(baseUrl: string, browser: "chrome" | "chromium"): Promise<Envelope<{ recordingId: string }>>;
+    start(baseUrl: string, browser: RecorderBrowser): Promise<Envelope<{ recordingId: string }>>;
     stop(recordingId: string): Promise<Envelope<{ steps: TestStep[] }>>;
     onEvent(cb: (event: RecorderEvent) => void): () => void;
   };
@@ -120,3 +120,4 @@ export type { WriteOutcome, AutomationMapping } from "../services/codegen/genera
 export type { RunRequest, ExecutionSummary, ExecutionDetail, TriggerType } from "../services/execution/executionService";
 export type { ExecutionEvent, RuntimeCheckResult, ExecutionResult, NormalizedTestResult } from "../services/execution/ExecutionAdapter";
 export type { DashboardAnalytics, ExecutionTrendPoint } from "../services/analyticsService";
+export type { RecorderBrowser } from "../services/recorder/recorderService";

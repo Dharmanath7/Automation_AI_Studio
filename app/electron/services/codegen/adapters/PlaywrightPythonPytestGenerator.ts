@@ -437,17 +437,36 @@ def _configure_smart_waits(env):
     expect.set_options(timeout=env["timeout_ms"])
 
 
+
+# "edge" and "chrome" are channels of the chromium engine, not engines of
+# their own — Playwright's Python API has no playwright.edge / playwright.chrome
+# attribute, so resolving them naively (getattr(playwright, browser_name))
+# raises AttributeError. Map each selectable browser to its actual engine
+# plus, where relevant, the channel that picks the system-installed build.
+_BROWSER_ENGINES = {"chrome": "chromium", "edge": "chromium", "chromium": "chromium", "firefox": "firefox", "webkit": "webkit"}
+_BROWSER_CHANNELS = {"chrome": "chrome", "edge": "msedge"}
+
+
 @pytest.fixture()
 def page(env):
     headless = os.environ.get("HEADLESS", "true").lower() == "true"
     browser_name = os.environ.get("BROWSER", "chromium")
     with sync_playwright() as playwright:
-        browser_type = getattr(playwright, browser_name if browser_name != "chrome" else "chromium")
+        engine_name = _BROWSER_ENGINES.get(browser_name, "chromium")
+        browser_type = getattr(playwright, engine_name)
         launch_kwargs = {"headless": headless}
-        if browser_name == "chrome":
-            launch_kwargs["channel"] = "chrome"
+        channel = _BROWSER_CHANNELS.get(browser_name)
+        if channel:
+            launch_kwargs["channel"] = channel
+        if not headless and engine_name == "chromium":
+            # Chromium-family only: launch maximized and let the page fill
+            # the real window size (viewport=None below) instead of
+            # Playwright's small fixed default — most useful while watching
+            # a headed run, same as the recorder.
+            launch_kwargs["args"] = ["--start-maximized"]
         browser = browser_type.launch(**launch_kwargs)
-        context = browser.new_context()
+        context_kwargs = {"no_viewport": True} if (not headless and engine_name == "chromium") else {}
+        context = browser.new_context(**context_kwargs)
         # Context-level (not just page-level) so any additional tab/window
         # opened during the test — see docs on the "newTab" step — inherits
         # the same smart-wait budget automatically.

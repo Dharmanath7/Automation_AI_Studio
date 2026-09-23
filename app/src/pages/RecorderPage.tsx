@@ -4,6 +4,8 @@ import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, useStepList } from "@/components/StepEditor";
 import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
 import { STEP_TYPES, type TestStep } from "@shared/testModel";
+import type { RecorderBrowser } from "@shared/ipcApi";
+import { RECORDER_BROWSER_OPTIONS } from "@/lib/browserOptions";
 
 type Phase = "configure" | "recording" | "review";
 
@@ -15,7 +17,7 @@ export default function RecorderPage() {
   const environment = environments.find((e) => e.id === currentEnvironmentId);
 
   const [phase, setPhase] = useState<Phase>("configure");
-  const [browser, setBrowser] = useState<"chrome" | "chromium">("chrome");
+  const [browser, setBrowser] = useState<RecorderBrowser>("chrome");
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [liveSteps, setLiveSteps] = useState<TestStep[]>([]);
   const [startError, setStartError] = useState<string | null>(null);
@@ -146,9 +148,12 @@ export default function RecorderPage() {
             </div>
             <div className="mini-field">
               <span className="mini-label">Browser</span>
-              <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-                <option value="chrome">Chrome</option>
-                <option value="chromium">Chromium</option>
+              <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as RecorderBrowser)}>
+                {RECORDER_BROWSER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
             </div>
             <button className="primary" onClick={() => void handleStart()} disabled={!environment || isStarting}>

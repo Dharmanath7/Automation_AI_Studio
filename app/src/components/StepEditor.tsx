@@ -249,7 +249,12 @@ export function ValueEditor({
             // most fields aren't a name field, and "James Smith" showing up
             // for an arbitrary text box reads as a real (if fake) person
             // more than obviously-generated test data does.
-            else if (newKind === "random") onChange({ kind: "random", generator: "randomString", seedOnce: true });
+            // seedOnce defaults to false: a fresh random value is generated
+            // every time the test runs (a call to random_data.X() at
+            // runtime), not baked into the generated source as a literal
+            // the first time — "Generate Once" is an opt-in for the rarer
+            // case where the same value must stay stable across runs.
+            else if (newKind === "random") onChange({ kind: "random", generator: "randomString", seedOnce: false });
             else onChange({ kind: "boundary", boundary: "empty" });
           }}
         >
@@ -296,19 +301,31 @@ export function ValueEditor({
               ))}
             </select>
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 4, textTransform: "none", fontWeight: 400, paddingBottom: 9 }}>
+          <label
+            style={{ display: "flex", alignItems: "center", gap: 4, textTransform: "none", fontWeight: 400, paddingBottom: 9 }}
+            title="Off (default): a fresh random value is generated every time the test runs. On: the value is locked in once and reused on every future run."
+          >
             <input
               type="checkbox"
               style={{ width: "auto" }}
               checked={value.seedOnce}
               onChange={(e) => onChange({ ...value, seedOnce: e.target.checked })}
             />
-            Generate Once
+            Use the same value every run
           </label>
-          <button type="button" onClick={() => onChange({ ...value, generatedValue: generateRandomValue(value.generator, value.pattern) })}>
-            🎲 Preview
+          <button
+            type="button"
+            title={value.seedOnce ? "Generates and locks in this value — every future run will reuse it." : "Just a preview — a new value is generated each time the test actually runs."}
+            onClick={() => onChange({ ...value, generatedValue: generateRandomValue(value.generator, value.pattern) })}
+          >
+            🎲 {value.seedOnce ? "Generate & Lock Value" : "Preview Example"}
           </button>
-          {value.generatedValue !== undefined && <span className="mono muted">{value.generatedValue}</span>}
+          {value.generatedValue !== undefined && (
+            <span className="mono muted">
+              {value.generatedValue}
+              {!value.seedOnce && " (example only — changes every run)"}
+            </span>
+          )}
         </>
       )}
 

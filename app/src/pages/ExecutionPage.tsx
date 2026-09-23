@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useProjectStore } from "@/state/projectStore";
-import type { TestCase, TriggerType } from "@shared/ipcApi";
+import type { TestCase, TriggerType, RecorderBrowser } from "@shared/ipcApi";
+import { EXECUTION_BROWSER_OPTIONS } from "@/lib/browserOptions";
 
 const SUITES: TriggerType[] = ["bvt", "smoke", "sanity", "regression"];
 
@@ -12,7 +13,7 @@ export default function ExecutionPage() {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [trigger, setTrigger] = useState<TriggerType>("smoke");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [browser, setBrowser] = useState<"chrome" | "chromium">("chrome");
+  const [browser, setBrowser] = useState<RecorderBrowser>("chrome");
   const [mode, setMode] = useState<"headed" | "headless">("headless");
   const [buildId, setBuildId] = useState("");
   const [log, setLog] = useState<string>("");
@@ -117,9 +118,12 @@ export default function ExecutionPage() {
           </div>
           <div className="mini-field">
             <span className="mini-label">Browser</span>
-            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as typeof browser)}>
-              <option value="chrome">Chrome</option>
-              <option value="chromium">Chromium</option>
+            <select aria-label="Browser" value={browser} onChange={(e) => setBrowser(e.target.value as RecorderBrowser)}>
+              {EXECUTION_BROWSER_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="mini-field">

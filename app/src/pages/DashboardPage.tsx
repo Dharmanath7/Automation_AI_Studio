@@ -4,6 +4,7 @@ import { useProjectStore } from "@/state/projectStore";
 import type { ExecutionSummary, DashboardAnalytics } from "@shared/ipcApi";
 import { BarChart, type BarDatum } from "@/components/charts/BarChart";
 import { StackedTrendChart } from "@/components/charts/StackedTrendChart";
+import { PieChart } from "@/components/charts/PieChart";
 import { chartColors, FAILURE_CLASSIFICATION_LABELS } from "@/components/charts/colors";
 
 const SUITE_ORDER = ["bvt", "smoke", "sanity", "regression"];
@@ -56,6 +57,12 @@ export default function DashboardPage() {
       color: chartColors.status.critical,
     }));
 
+  const passFailPie = [
+    { key: "passed", label: "Passed", value: analytics.recentExecutions.reduce((sum, e) => sum + e.passed, 0), color: chartColors.status.good },
+    { key: "failed", label: "Failed", value: analytics.recentExecutions.reduce((sum, e) => sum + e.failed, 0), color: chartColors.status.critical },
+    { key: "skipped", label: "Skipped", value: analytics.recentExecutions.reduce((sum, e) => sum + e.skipped, 0), color: chartColors.status.neutral },
+  ];
+
   return (
     <div className="stack">
       <h1>{currentProject?.name}</h1>
@@ -77,6 +84,13 @@ export default function DashboardPage() {
             Pass / fail / skip for the last {analytics.recentExecutions.length || 0} execution(s), oldest to newest.
           </p>
           <StackedTrendChart points={analytics.recentExecutions} />
+        </div>
+        <div className="card" style={{ flex: 1, minWidth: 260 }}>
+          <h2>Test Results Breakdown</h2>
+          <p className="muted" style={{ marginTop: -8, marginBottom: 14, fontSize: 12.5 }}>
+            Combined across the last {analytics.recentExecutions.length || 0} execution(s).
+          </p>
+          <PieChart data={passFailPie} emptyLabel="No executions yet." />
         </div>
         <div className="card" style={{ flex: 1, minWidth: 260 }}>
           <h2>Tests by Suite</h2>

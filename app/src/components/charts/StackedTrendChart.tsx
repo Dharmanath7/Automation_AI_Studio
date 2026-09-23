@@ -30,16 +30,25 @@ export function StackedTrendChart({ points }: { points: ExecutionTrendPoint[] })
   }
 
   const maxTotal = Math.max(1, ...points.map((p) => p.total));
-  const plotHeight = 140;
-  const barWidth = 22;
-  const gap = 14;
+  const plotHeight = 90;
+  const barWidth = 18;
+  const gap = 10;
   const chartWidth = points.length * (barWidth + gap) + gap;
-  const totalHeight = plotHeight + 26; // plot + axis label band
+  const totalHeight = plotHeight + 22; // plot + axis label band
   const segmentGap = 2;
 
   return (
     <div>
-      <svg width="100%" viewBox={`0 0 ${chartWidth} ${totalHeight}`} role="img" aria-label="Executions pass/fail trend">
+      {/* Rendered at its natural pixel size (never width: 100%) — a small
+          number of executions gives a narrow viewBox, and stretching that
+          to fill a wide card blows the height up proportionally right
+          along with it, which is what made this chart huge for anything
+          but a full execution history. overflow-x lets a long history
+          scroll sideways instead of forcing the chart (and the page)
+          wider; the legend below stays outside the scroll area so it's
+          never itself cut off. */}
+      <div style={{ overflowX: "auto" }}>
+        <svg width={chartWidth} height={totalHeight} viewBox={`0 0 ${chartWidth} ${totalHeight}`} role="img" aria-label="Executions pass/fail trend">
         <line x1={0} y1={plotHeight} x2={chartWidth} y2={plotHeight} stroke={chartColors.baseline} strokeWidth={1} />
         {points.map((p, i) => {
           const x = gap + i * (barWidth + gap);
@@ -88,7 +97,8 @@ export function StackedTrendChart({ points }: { points: ExecutionTrendPoint[] })
             </g>
           );
         })}
-      </svg>
+        </svg>
+      </div>
       <div className="row" style={{ gap: 16, marginTop: 4 }}>
         {SEGMENTS.map((s) => (
           <span key={s.key} className="row" style={{ gap: 6, fontSize: 12 }}>

@@ -32,11 +32,11 @@ export const RECORDER_INIT_SCRIPT = `
     return null;
   }
 
-  function shortCssPath(el) {
+  function buildCssPath(el, maxDepth) {
     const parts = [];
     let node = el;
     let depth = 0;
-    while (node && node.nodeType === 1 && depth < 4) {
+    while (node && node.nodeType === 1 && depth < maxDepth) {
       let part = node.tagName.toLowerCase();
       if (node.id) {
         part += '#' + node.id;
@@ -53,6 +53,29 @@ export const RECORDER_INIT_SCRIPT = `
       depth++;
     }
     return parts.join(' > ');
+  }
+
+  // A 4-level path like "div > table > tbody > tr:nth-of-type(2)" is only
+  // unique relative to ITS OWN ancestor chain — on a page with more than one
+  // matching table/list structure (a very common layout), the exact same
+  // path also matches the Nth row of every other such structure, and
+  // Playwright's actions refuse to run against a locator matching more than
+  // one element ("strict mode violation") no matter how long they wait, so
+  // no amount of extra timeout fixes it. Grow the path deeper, level by
+  // level, until it's actually unique on the page (or give up at a generous
+  // depth and return the deepest attempt as a last resort).
+  function shortCssPath(el) {
+    let lastPath = '';
+    for (let maxDepth = 4; maxDepth <= 12; maxDepth++) {
+      const path = buildCssPath(el, maxDepth);
+      lastPath = path;
+      try {
+        if (document.querySelectorAll(path).length === 1) return path;
+      } catch (e) {
+        break;
+      }
+    }
+    return lastPath;
   }
 
   function roleForElement(el) {

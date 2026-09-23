@@ -38,14 +38,45 @@ interface MappingRow {
   content_hash: string | null;
 }
 
+const SUPPORT_FILE_HASHES_KEY = "automation_support_file_hashes";
+
 /**
- * Writes a generated test file + page objects to disk, honoring source
- * ownership: a file whose on-disk hash no longer matches the hash recorded
- * at last generation was edited outside the Studio, and is reported as a
- * conflict rather than overwritten, unless its path is in `forcePaths`
- * (the caller obtained explicit user confirmation — docs/SECURITY.md §6).
- * Support files (conftest.py, pytest.ini, ...) are create-once and never
- * overwritten once present.
+ * Support files (conftest.py, pytest.ini, requirements.txt) are shared by
+ * every test case in the project, not owned by one — so their hash-tracking
+ * (see writeGeneratedCode's docstring) is stored per-project in
+ * project_settings rather than in any one test case's automation_mappings
+ * row, which no single test case can be the source of truth for.
+ */
+function getSupportFileHashes(db: SqlJsDatabase, projectId: string): Record<string, string> {
+  const row = db
+    .prepare(`SELECT value FROM project_settings WHERE project_id = ? AND key = ?`)
+    .get(projectId, SUPPORT_FILE_HASHES_KEY) as { value: string } | undefined;
+  return row?.value ? JSON.parse(row.value) : {};
+}
+
+function setSupportFileHashes(db: SqlJsDatabase, projectId: string, hashes: Record<string, string>): void {
+  db.prepare(
+    `INSERT INTO project_settings (id, project_id, key, value) VALUES (?, ?, ?, ?)
+     ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`
+  ).run(uuidv4(), projectId, SUPPORT_FILE_HASHES_KEY, JSON.stringify(hashes));
+}
+
+/**
+ * Writes a generated test file + page objects + support files to disk,
+ * honoring source ownership: a file whose on-disk hash no longer matches
+ * the hash recorded at last generation was edited outside the Studio, and
+ * is reported as a conflict rather than overwritten, unless its path is in
+ * `forcePaths` (the caller obtained explicit user confirmation —
+ * docs/SECURITY.md §6).
+ *
+ * Support files used to be create-once-never-touched, which meant a project
+ * whose conftest.py was generated before a template improvement (e.g. the
+ * smart-wait fixture, or a new browser engine mapping) landed would keep
+ * running the stale version forever, silently, since codegen never revisits
+ * a file that already exists on disk. They now go through the same
+ * hash-tracked upgrade path as page objects: unmodified support files pick
+ * up template improvements automatically, and files the user has actually
+ * customized are still protected via the conflict flow above.
  */
 export function writeGeneratedCode(
   db: SqlJsDatabase,
@@ -65,6 +96,7 @@ export function writeGeneratedCode(
   const priorHashes: Record<string, string> = existingMapping?.content_hash
     ? JSON.parse(existingMapping.content_hash)
     : {};
+  const priorSupportHashes = getSupportFileHashes(db, project.id);
 
   const filesToWrite: GeneratedFile[] = [result.testFile, ...result.pageObjectFiles];
   const newHashes: Record<string, string> = { ...priorHashes };
@@ -100,13 +132,50 @@ export function writeGeneratedCode(
     newHashes[file.relativePath] = newHash;
   }
 
+  const newSupportHashes: Record<string, string> = { ...priorSupportHashes };
   for (const file of result.supportFiles) {
     const absPath = resolveWithinProject(project.projectDirectory, file.relativePath);
-    if (fs.existsSync(absPath)) continue;
+    const newHash = sha256(file.content);
+
+    if (fs.existsSync(absPath)) {
+      const currentContent = fs.readFileSync(absPath, "utf8");
+      const currentHash = sha256(currentContent);
+      const knownPriorHash = priorSupportHashes[file.relativePath];
+      const editedOutsideStudio = knownPriorHash !== undefined && knownPriorHash !== currentHash;
+
+      if (editedOutsideStudio && !forcePaths.has(file.relativePath)) {
+        outcome.conflicts.push({
+          relativePath: file.relativePath,
+          existingContent: currentContent,
+          generatedContent: file.content,
+        });
+        continue;
+      }
+      if (currentHash === newHash && !editedOutsideStudio) {
+        outcome.skippedUnchanged.push(file.relativePath);
+        newSupportHashes[file.relativePath] = newHash;
+        continue;
+      }
+      // knownPriorHash === undefined means this file predates hash-tracking
+      // (created before this project ever recorded a support-file hash) —
+      // treat it as Studio-owned and safe to upgrade rather than a permanent
+      // conflict, since "silently never upgrades" is the exact staleness
+      // bug this replaced. Flagged as a warning rather than a silent
+      // overwrite since, unlike the tracked case, a hand-edit made before
+      // tracking existed can't be told apart from an untouched old file.
+      if (knownPriorHash === undefined && currentHash !== newHash) {
+        outcome.warnings.push(
+          `Upgraded ${file.relativePath} to the latest Studio template (it predated per-file change tracking, so if you had customized it, re-apply those changes from your editor history).`
+        );
+      }
+    }
+
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     fs.writeFileSync(absPath, file.content, "utf8");
     outcome.written.push(file.relativePath);
+    newSupportHashes[file.relativePath] = newHash;
   }
+  setSupportFileHashes(db, project.id, newSupportHashes);
 
   if (outcome.conflicts.length === 0) {
     const now = new Date().toISOString();

@@ -284,6 +284,27 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
           continue;
         }
 
+        if (step.type === "fill" && (step.value?.kind === "random" || step.value?.kind === "boundary")) {
+          // .fill() sets the value directly (native setter + input/change
+          // events), which most fields handle fine — but a dynamically
+          // generated value is exactly the kind most likely to land on a
+          // field with keydown/keyup-driven logic (a live autocomplete/
+          // typeahead search, an input mask, per-keystroke validation),
+          // which .fill() never triggers at all since it isn't real
+          // keystrokes. Caught via a real report of a random value being
+          // typed but "not accepted" by the app. press_sequentially()
+          // simulates each character as an actual keydown/keypress/input/
+          // keyup sequence, same as a person typing, which those listeners
+          // do respond to. An explicit click first guarantees focus,
+          // rather than relying on press_sequentially to establish it.
+          body.push(`self.${attr}.click()`);
+          body.push(`self.${attr}.press_sequentially(${renderValueExpr(step.value)})`);
+          if (step.screenshotOnStep) {
+            body.push(`maybe_screenshot(self.page, ${pyStr(step.id)})`);
+          }
+          continue;
+        }
+
         if ((step.type === "click" || step.type === "doubleClick") && tabOpeningStepIds.has(step.id)) {
           // This click opens a new browser tab (recorded as a click
           // immediately followed by a "newTab" step). Wrap it so Playwright
@@ -523,6 +544,7 @@ pytest-xdist>=3.6
   const randomDataPy = `"""Random / dynamic test-data generation. Mirrors electron/shared/randomData.ts."""
 import random
 import string
+import time
 import uuid as uuid_lib
 from datetime import date, timedelta
 
@@ -573,9 +595,15 @@ def alphanumeric(length: int = 10) -> str:
 def random_string() -> str:
     # Deliberately garbage-looking (lowercase letters + trailing digits) so
     # it's never mistaken for a real value — mirrors electron/shared/randomData.ts.
-    letters = "".join(random.choices(string.ascii_lowercase, k=random.randint(8, 14)))
-    digits = "".join(random.choices(string.digits, k=random.randint(2, 4)))
-    return f"{letters}{digits}"
+    # The trailing digits are a millisecond-timestamp fragment, not just
+    # random.choices() — every value is then actually unique (not merely
+    # "very probably" unique), so re-running the same test repeatedly can
+    # never collide with a value an earlier run already used, which matters
+    # whenever the system under test enforces its own uniqueness constraint
+    # (e.g. rejecting a duplicate name).
+    letters = "".join(random.choices(string.ascii_lowercase, k=random.randint(6, 10)))
+    unique_suffix = str(int(time.time() * 1000))[-8:]
+    return f"{letters}{unique_suffix}"
 
 
 def date_() -> str:

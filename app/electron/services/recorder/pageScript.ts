@@ -177,9 +177,24 @@ export const RECORDER_INIT_SCRIPT = `
     return ['button', 'link', 'tab', 'menuitem'].indexOf(role || '') !== -1;
   }
 
+  // Any real interaction — not just ones that themselves get recorded as a
+  // "click" step — should suppress a pending hover on that same element.
+  // Clicking into a plain text field to focus it before typing/filling is
+  // the clearest case: it's not a recorded click action at all (isClickTarget()
+  // deliberately excludes plain text inputs below), so the 'click' listener's
+  // own suppression call never runs for it, leaving that field's dwell timer
+  // or pending hover emission free to fire later on its own — caught live as
+  // a spurious hover recorded on a field immediately before filling it.
+  // mousedown (not click) so it also runs ahead of whatever the click
+  // handler does, on every element unconditionally.
+  document.addEventListener('mousedown', function (ev) {
+    if (ev.target) cancelPendingHoverIfSameElement(ev.target);
+  }, true);
+
   document.addEventListener('click', function (ev) {
     const el = ev.target && ev.target.closest ? ev.target.closest('button, a, input, [role]') : null;
     if (!el || !isClickTarget(el)) return;
+    cancelPendingHoverIfSameElement(el);
     flashHighlight(el, 'click');
     send({ kind: 'click', locator: computeLocator(el) });
   }, true);
@@ -187,6 +202,7 @@ export const RECORDER_INIT_SCRIPT = `
   document.addEventListener('dblclick', function (ev) {
     const el = ev.target && ev.target.closest ? ev.target.closest('button, a, input, [role]') : null;
     if (!el || !isClickTarget(el)) return;
+    cancelPendingHoverIfSameElement(el);
     flashHighlight(el, 'dblclick');
     send({ kind: 'dblclick', locator: computeLocator(el) });
   }, true);
@@ -194,6 +210,7 @@ export const RECORDER_INIT_SCRIPT = `
   document.addEventListener('change', function (ev) {
     const el = ev.target;
     if (!el || !el.tagName) return;
+    cancelPendingHoverIfSameElement(el);
     const tag = el.tagName.toLowerCase();
     if (tag === 'select') {
       flashHighlight(el, 'select');
@@ -254,13 +271,17 @@ export const RECORDER_INIT_SCRIPT = `
       (tag === 'input' && ['checkbox', 'radio', 'submit', 'button', 'reset', 'image', 'file', 'password'].indexOf((el.getAttribute('type') || 'text').toLowerCase()) === -1);
     if (!isTextInput) return { ok: false, reason: 'The focused element is not a text field.' };
 
+    cancelPendingHoverIfSameElement(el);
+
+    // Format mirrors random_string() in the generated utils/random_data.py
+    // and generateRandomValue()'s "randomString" case — letters plus a
+    // millisecond-timestamp fragment, so this preview alone is already
+    // collision-proof across repeated recordings, not just "very probably"
+    // unique.
     var letters = '';
-    var letterCount = 8 + Math.floor(Math.random() * 6);
+    var letterCount = 6 + Math.floor(Math.random() * 5);
     for (var i = 0; i < letterCount; i++) letters += String.fromCharCode(97 + Math.floor(Math.random() * 26));
-    var digits = '';
-    var digitCount = 2 + Math.floor(Math.random() * 3);
-    for (var j = 0; j < digitCount; j++) digits += String(Math.floor(Math.random() * 10));
-    var previewValue = letters + digits;
+    var previewValue = letters + String(Date.now()).slice(-8);
 
     setNativeValue(el, previewValue);
     flashHighlight(el, 'fill');
@@ -326,8 +347,11 @@ export const RECORDER_INIT_SCRIPT = `
     return false;
   }
 
+  var NON_HOVERABLE_TAGS = ['html', 'body', 'script', 'style', 'head', 'meta', 'link', 'br', 'wbr', 'title'];
+
   function isHoverTarget(el) {
     if (!el || el.nodeType !== 1 || el === document.body || el === document.documentElement) return false;
+    if (NON_HOVERABLE_TAGS.indexOf(el.tagName.toLowerCase()) !== -1) return false;
     if (isClickTarget(el)) return true;
     var role = el.getAttribute('role');
     if (['menu', 'menuitem', 'tab', 'tooltip', 'option'].indexOf(role || '') !== -1) return true;
@@ -335,7 +359,68 @@ export const RECORDER_INIT_SCRIPT = `
     if (el.querySelector(':scope > .dropdown-menu, :scope > [role="menu"]')) return true;
     try { if (getComputedStyle(el).cursor === 'pointer') return true; } catch (e) {}
     if (hasHoverStyleRule(el)) return true;
-    return false;
+    // Fallback: any other bounded, non-page-sized element the pointer
+    // rests on is still plausibly a deliberate hover target. Most React
+    // (and similar) apps implement hover-reveal menus/tooltips purely via
+    // onMouseEnter-style JS handlers with no CSS :hover rule and no
+    // cursor:pointer at all — and React's synthetic event system delegates
+    // listeners at the app root rather than attaching them to the element
+    // itself, so "does this element have a hover handler" genuinely can't
+    // be observed from outside React. Without this fallback, that entire
+    // (very common) category of hover-driven UI is invisible to the
+    // recorder no matter how long the dwell. mouseoverToClickSuppresses()
+    // below keeps this from turning every "move toward a button, pause,
+    // then click it" into a spurious extra hover step.
+    try {
+      var rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      var coversViewport = rect.width > window.innerWidth * 0.9 && rect.height > window.innerHeight * 0.9;
+      return !coversViewport;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // A hover immediately followed by a click/fill/etc. on the SAME element
+  // is almost always just the natural "move the mouse toward what you're
+  // about to interact with, pausing briefly on the way" — not a deliberate
+  // hover-to-reveal action — now that isHoverTarget() above accepts nearly
+  // any element as a candidate rather than only ones with an explicit
+  // hover signal. Recording it as a separate "hover" step ahead of the
+  // real action would just be noise the person has to delete by hand. The
+  // hover's own recording is delayed by this buffer so it can be silently
+  // dropped if a real action on the same element follows within it; the
+  // visual highlight still fires immediately at dwell-time regardless, so
+  // recording still *feels* instant.
+  var HOVER_EMIT_BUFFER_MS = 450;
+  var pendingHoverEl = null;
+  var pendingHoverTimer = null;
+
+  function sameOrRelated(a, b) {
+    if (!a || !b) return false;
+    return a === b || (a.contains && a.contains(b)) || (b.contains && b.contains(a));
+  }
+
+  function cancelPendingHoverIfSameElement(el) {
+    // Two separate pieces of state can be in flight when a real action
+    // lands on the element the pointer is sitting on: the pre-dwell timer
+    // (mouse hasn't rested long enough yet to even be a hover candidate)
+    // and the post-dwell pending emission (dwell fired, still inside the
+    // emit buffer). A click can land during EITHER window — Playwright's
+    // own click, and most real users, act on an element well under 500ms
+    // after the pointer reaches it — so both must be cleared, or the
+    // pre-dwell timer just fires later on its own and records a hover for
+    // an interaction that already resolved as a click.
+    if (sameOrRelated(el, hoverTarget)) {
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = null;
+      hoverTarget = null;
+    }
+    if (sameOrRelated(el, pendingHoverEl)) {
+      if (pendingHoverTimer) clearTimeout(pendingHoverTimer);
+      pendingHoverEl = null;
+      pendingHoverTimer = null;
+    }
   }
 
   document.addEventListener('mouseover', function (ev) {
@@ -351,7 +436,14 @@ export const RECORDER_INIT_SCRIPT = `
     hoverTimer = setTimeout(function () {
       if (hoverTarget !== el) return;
       flashHighlight(el, 'hover');
-      send({ kind: 'hover', locator: computeLocator(el) });
+      if (pendingHoverTimer) clearTimeout(pendingHoverTimer);
+      pendingHoverEl = el;
+      pendingHoverTimer = setTimeout(function () {
+        if (pendingHoverEl !== el) return;
+        pendingHoverEl = null;
+        pendingHoverTimer = null;
+        send({ kind: 'hover', locator: computeLocator(el) });
+      }, HOVER_EMIT_BUFFER_MS);
     }, HOVER_DWELL_MS);
   }, true);
 

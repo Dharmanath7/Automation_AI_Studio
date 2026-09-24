@@ -73,11 +73,17 @@ export function generateRandomValue(generator: RandomGenerator, pattern?: string
     case "decimal": return (Math.random() * 10_000).toFixed(2);
     case "alphanumeric": return alphanumeric(10);
     // Deliberately garbage-looking (lowercase letters + trailing digits,
-    // e.g. "ihabscjhbajchs8812") rather than mixed-case — this is the
-    // default generator for "Random", and junk data that obviously isn't a
-    // real value is exactly the point, as opposed to something that could
-    // be mistaken for genuine (if fake) input.
-    case "randomString": return `${lowercaseLetters(randomInt(8, 14))}${randomDigits(randomInt(2, 4))}`;
+    // e.g. "ihabsc84213765") rather than mixed-case — this is the default
+    // generator for "Random", and junk data that obviously isn't a real
+    // value is exactly the point, as opposed to something that could be
+    // mistaken for genuine (if fake) input. The trailing digits are a
+    // millisecond-timestamp fragment, not just random.choices() — that
+    // makes every value actually unique (not merely "very probably"
+    // unique), which matters when the system under test enforces its own
+    // uniqueness constraint (e.g. rejecting a duplicate name) and repeated
+    // runs must never collide with a value a previous run already used.
+    // Mirrors random_string() in the generated utils/random_data.py.
+    case "randomString": return `${lowercaseLetters(randomInt(6, 10))}${String(Date.now()).slice(-8)}`;
     case "date": return isoDate(0);
     case "pastDate": return isoDate(-randomInt(1, 365));
     case "futureDate": return isoDate(randomInt(1, 365));

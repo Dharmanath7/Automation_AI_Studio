@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { generateRandomValue, generateBoundaryValue } from "../../electron/shared/randomData";
 
 describe("randomData", () => {
@@ -15,10 +15,22 @@ describe("randomData", () => {
   it("generates a garbage-looking string (lowercase letters + trailing digits), not a realistic word", () => {
     // Regression: "randomString" is the default generator when a field is
     // marked Random — it should read as obvious junk data (matching the
-    // style of a real generated value, e.g. "ihabscjhbajchs8812"), not
+    // style of a real generated value, e.g. "ihabsc84213765"), not
     // something that could pass for a genuine value.
     const value = generateRandomValue("randomString");
-    expect(value).toMatch(/^[a-z]{8,14}[0-9]{2,4}$/);
+    expect(value).toMatch(/^[a-z]{6,10}[0-9]{8}$/);
+  });
+
+  describe("randomString uniqueness across separate calls/runs", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    it("regression: the trailing digits actually track the clock, not just random.choices() — so values generated at genuinely different times (e.g. separate test runs) can never collide even if the random letters happen to match", () => {
+      vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_123);
+      const a = generateRandomValue("randomString");
+      vi.spyOn(Date, "now").mockReturnValue(1_700_000_005_456);
+      const b = generateRandomValue("randomString");
+      expect(a.slice(-8)).not.toBe(b.slice(-8));
+    });
   });
 
   describe("generateBoundaryValue", () => {

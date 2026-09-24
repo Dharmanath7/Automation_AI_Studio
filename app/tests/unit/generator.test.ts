@@ -258,3 +258,55 @@ describe("PlaywrightPythonPytestGenerator — hover steps", () => {
     expect(page).toMatch(/self\.\w+\.hover\(\)/);
   });
 });
+
+describe("PlaywrightPythonPytestGenerator — random/boundary fills use real keystrokes", () => {
+  const ctx = { projectDirectory: "C:/proj", projectCode: "PROJ", existingPageObjectNames: [] };
+
+  it("regression: a random-value fill is typed via click() + press_sequentially(), not .fill() — a real report of a random value being typed but 'not accepted' by the app traced to .fill() setting the DOM value directly without emitting real keydown/keyup events, which live autocomplete/typeahead search and per-keystroke validation only respond to", () => {
+    const model: TestModel = {
+      schemaVersion: 1,
+      testCaseId: "tc-random-fill",
+      projectId: "proj-1",
+      name: "Random Fill Keystrokes",
+      tags: [],
+      steps: [
+        { id: "r1", type: "navigate", value: { kind: "variable", path: "base_url" }, enabled: true },
+        {
+          id: "r2",
+          type: "fill",
+          target: { preferred: { strategy: "role", value: "textbox", roleName: "Location Name", quality: "excellent" }, alternatives: [] },
+          value: { kind: "random", generator: "randomString", seedOnce: false },
+          enabled: true,
+        },
+      ],
+    };
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toMatch(/self\.\w+\.click\(\)\s*\n\s*self\.\w+\.press_sequentially\(random_data\.random_string\(\)\)/);
+    expect(page).not.toMatch(/self\.\w+\.fill\(random_data\.random_string\(\)\)/);
+  });
+
+  it("a plain literal fill still uses .fill() (unaffected — no evidence of that being broken, and it's meaningfully faster)", () => {
+    const model: TestModel = {
+      schemaVersion: 1,
+      testCaseId: "tc-literal-fill",
+      projectId: "proj-1",
+      name: "Literal Fill",
+      tags: [],
+      steps: [
+        { id: "l1", type: "navigate", value: { kind: "variable", path: "base_url" }, enabled: true },
+        {
+          id: "l2",
+          type: "fill",
+          target: { preferred: { strategy: "role", value: "textbox", roleName: "Notes", quality: "excellent" }, alternatives: [] },
+          value: { kind: "literal", value: "hello" },
+          enabled: true,
+        },
+      ],
+    };
+    const result = PlaywrightPythonPytestGenerator.generate(model, ctx);
+    const page = result.pageObjectFiles[0].content;
+    expect(page).toMatch(/self\.\w+\.fill\("hello"\)/);
+    expect(page).not.toContain("press_sequentially");
+  });
+});

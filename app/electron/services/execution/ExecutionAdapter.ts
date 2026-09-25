@@ -31,6 +31,8 @@ export interface NormalizedTestResult {
   durationMs: number;
   errorMessage?: string;
   failedStepIndex?: number;
+  /** Plain-language description of the failed step (e.g. 'fill "Username" (role)'), read from the generated code's own "# STEP n: ..." marker comment at the traceback's failing line — reflects exactly what ran, not the (possibly since-edited) Test Model. */
+  failedStepDescription?: string;
   failureClassification?: FailureClassification;
   steps: NormalizedStepResult[];
   artifacts: { kind: "screenshot" | "video" | "trace"; path: string; stepIndex?: number }[];

@@ -142,8 +142,8 @@ function persistResult(
     const executionTestId = uuidv4();
     db.prepare(
       `INSERT INTO execution_tests
-        (id, execution_id, test_case_id, automation_mapping_id, status, duration_ms, error_message, failure_classification, started_at, finished_at)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
+        (id, execution_id, test_case_id, automation_mapping_id, status, duration_ms, error_message, failed_step_index, failed_step_description, failure_classification, started_at, finished_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       executionTestId,
       executionId,
@@ -151,6 +151,8 @@ function persistResult(
       testResult.status,
       testResult.durationMs,
       testResult.errorMessage ?? null,
+      testResult.failedStepIndex ?? null,
+      testResult.failedStepDescription ?? null,
       testResult.failureClassification ?? null,
       result.startedAt,
       result.finishedAt
@@ -224,6 +226,8 @@ export interface ExecutionDetail extends ExecutionSummary {
     status: string;
     durationMs: number;
     errorMessage: string | null;
+    failedStepIndex: number | null;
+    failedStepDescription: string | null;
     failureClassification: string | null;
     artifacts: { id: string; kind: string; filePath: string }[];
   }[];
@@ -245,6 +249,8 @@ export function getExecution(db: SqlJsDatabase, executionId: string): ExecutionD
     status: t.status,
     durationMs: t.duration_ms,
     errorMessage: t.error_message,
+    failedStepIndex: t.failed_step_index,
+    failedStepDescription: t.failed_step_description,
     failureClassification: t.failure_classification,
     artifacts: (db.prepare("SELECT id, kind, file_path FROM artifacts WHERE execution_test_id = ?").all(t.id) as any[]).map((a) => ({
       id: a.id,

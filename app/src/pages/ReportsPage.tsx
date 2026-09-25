@@ -4,7 +4,7 @@ import { useProjectStore } from "@/state/projectStore";
 import type { ExecutionSummary, ExecutionDetail, TestCase } from "@shared/ipcApi";
 import { StackedTrendChart } from "@/components/charts/StackedTrendChart";
 import { StatusBar } from "@/components/charts/StatusBar";
-import { FAILURE_CLASSIFICATION_LABELS } from "@/components/charts/colors";
+import { FAILURE_CLASSIFICATION_LABELS, FAILURE_CLASSIFICATION_EXPLANATIONS } from "@/components/charts/colors";
 
 // Looked up by artifact row id (server-resolved to the real file path in
 // main.ts) rather than encoding the Windows file path into the URL — see
@@ -179,12 +179,27 @@ function ExecutionDetailView({ executionId }: { executionId: string }) {
         {selectedTest && selectedTest.status !== "passed" && (
           <div className="card" style={{ flex: 1 }}>
             <h3>Failure Detail — {testLabel(selectedTest.testCaseId)}</h3>
+            {selectedTest.failedStepIndex != null && (
+              <p style={{ margin: "0 0 8px", fontWeight: 600 }}>
+                Failed at Step {selectedTest.failedStepIndex}
+                {selectedTest.failedStepDescription ? (
+                  <>
+                    : <span className="mono" style={{ fontWeight: 400 }}>{selectedTest.failedStepDescription}</span>
+                  </>
+                ) : null}
+              </p>
+            )}
             <p>
               <span className={`badge ${selectedTest.failureClassification ?? "neutral"}`}>
                 {selectedTest.failureClassification ? FAILURE_CLASSIFICATION_LABELS[selectedTest.failureClassification] ?? selectedTest.failureClassification : "Unknown"}
               </span>{" "}
               <span className="muted">(suggested — confirm or correct manually in a future release)</span>
             </p>
+            {selectedTest.failureClassification && (
+              <p className="muted" style={{ marginTop: -4, fontSize: 13 }}>
+                {FAILURE_CLASSIFICATION_EXPLANATIONS[selectedTest.failureClassification] ?? ""}
+              </p>
+            )}
             <pre
               className="mono"
               style={{ background: "#0f1117", color: "#f0b4b0", padding: 12, borderRadius: 6, maxHeight: 240, overflow: "auto", fontSize: 12 }}

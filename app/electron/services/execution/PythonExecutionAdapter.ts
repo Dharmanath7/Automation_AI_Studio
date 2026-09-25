@@ -57,13 +57,34 @@ function runCommand(exe: string, args: string[], cwd: string): Promise<{ stdout:
 
 export function classifyFailure(message: string): FailureClassification {
   const m = message.toLowerCase();
-  // Order matters: network/DNS failures must be checked before the auth
-  // heuristic, and the auth heuristic must require an actual auth-failure
-  // phrase — a bare "login" substring is too broad, since generated code
-  // routinely names its own methods/files "login_flow" / "login_page.py"
-  // regardless of why a test actually failed (caught via a real DNS
-  // failure inside a login_flow() call being misclassified as "auth").
-  if (m.includes("net::err") || m.includes("econnrefused") || m.includes("dns") || m.includes("name_not_resolved") || m.includes("connection")) {
+  // An explicit exception CLASS NAME is a far more reliable signal than any
+  // loose keyword search below, and is checked first for exactly that
+  // reason: a full pytest traceback for a plain Locator.fill() timeout
+  // passes through several of Playwright's own internal frames on its way
+  // to raising TimeoutError — including playwright._impl._connection —
+  // so a bare `.includes("connection")` check (previously below) matched
+  // every single one of those, misclassifying it as "environment" instead
+  // of "timeout". Caught via a real run, not by inspection.
+  if (m.includes("timeouterror") || m.includes("timeout_error")) return "timeout";
+
+  // Order matters below too: network/DNS failures must be checked before
+  // the auth heuristic, and the auth heuristic must require an actual
+  // auth-failure phrase — a bare "login" substring is too broad, since
+  // generated code routinely names its own methods/files "login_flow" /
+  // "login_page.py" regardless of why a test actually failed (caught via a
+  // real DNS failure inside a login_flow() call being misclassified as
+  // "auth"). The connection-failure check requires an actual failure
+  // phrase ("connection refused/reset/...") for the same reason
+  // TimeoutError is now checked first — a bare "connection" substring is
+  // too broad; it matches Playwright's own module/class names in every
+  // traceback regardless of what actually failed.
+  if (
+    m.includes("net::err") ||
+    m.includes("econnrefused") ||
+    m.includes("name_not_resolved") ||
+    m.includes("dns_probe") ||
+    /\bconnection (refused|reset|timed ?out|aborted)\b/.test(m)
+  ) {
     return "environment";
   }
   if (m.includes("timeout")) return "timeout";
@@ -81,6 +102,43 @@ export function classifyFailure(message: string): FailureClassification {
   if (/\b(50\d|4\d\d)\b/.test(m) && (m.includes("http") || m.includes("api"))) return "api";
   if (m.includes("browser") || m.includes("playwright._impl")) return "browser";
   return "unknown";
+}
+
+/**
+ * Traces a failure's pytest traceback back to the specific recorded/manual
+ * step that failed, by finding the deepest frame inside our own generated
+ * page object (not Playwright's own library code) and reading that exact
+ * source line's nearest preceding "# STEP n: ..." marker comment (emitted
+ * by PlaywrightPythonPytestGenerator.ts for exactly this purpose). Reads
+ * the marker from the file that actually ran, not the Test Model, since the
+ * Test Model may have been edited since — see WHERE the test case fails,
+ * which is often the harder half of "why did this fail" to answer from a
+ * raw Python traceback alone.
+ */
+export function locateFailingStep(
+  errorMessage: string,
+  projectDirectory: string
+): { stepIndex: number; description: string } | null {
+  const frameMatch = errorMessage.match(/([^\s:"']*_page\.py):(\d+): in \w+/);
+  if (!frameMatch) return null;
+  const [, relPath, lineStr] = frameMatch;
+  const lineNum = parseInt(lineStr, 10);
+  const projectRoot = path.resolve(projectDirectory);
+  const absPath = path.resolve(projectRoot, relPath);
+  if (absPath !== projectRoot && !absPath.startsWith(projectRoot + path.sep)) return null; // never read outside the project
+
+  let content: string;
+  try {
+    content = fs.readFileSync(absPath, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = content.split(/\r?\n/);
+  for (let i = Math.min(lineNum - 1, lines.length - 1); i >= 0; i--) {
+    const m = lines[i].match(/^\s*# STEP (\d+): (.+)$/);
+    if (m) return { stepIndex: parseInt(m[1], 10), description: m[2] };
+  }
+  return null;
 }
 
 export const PythonExecutionAdapter: ExecutionAdapter = {
@@ -236,12 +294,16 @@ export const PythonExecutionAdapter: ExecutionAdapter = {
             `${nodeId.split("::").slice(1).join("_")}_failure.png`
           );
 
+          const failedStep = errorMessage ? locateFailingStep(errorMessage, request.projectDirectory) : null;
+
           tests.push({
             testFilePath,
             nodeId,
             status,
             durationMs: Math.round((entry.call?.duration ?? entry.duration ?? 0) * 1000),
             errorMessage,
+            failedStepIndex: failedStep?.stepIndex,
+            failedStepDescription: failedStep?.description,
             failureClassification: errorMessage ? classifyFailure(errorMessage) : undefined,
             steps: [],
             artifacts: fs.existsSync(screenshotPath) ? [{ kind: "screenshot", path: screenshotPath }] : [],

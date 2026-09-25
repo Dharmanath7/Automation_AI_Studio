@@ -1,13 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
-import Editor from "@monaco-editor/react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import Editor, { loader as monacoLoader } from "@monaco-editor/react";
+// The bare "monaco-editor" package barrel pulls in every bundled language
+// (SQL, Solidity, PowerQuery, ABAP, ...) this app never uses, for a ~4MB
+// bundle — this viewer only ever shows generated Python. editor.api is
+// monaco-editor's own minimal core entry point (the standalone editor
+// itself, with no language definitions), and the Python module is the one
+// opt-in language actually needed on top of it.
+import * as monaco from "monaco-editor/editor/editor.api";
+import "monaco-editor/languages/definitions/python/python.js";
 import { STEP_TYPES, type TestStep, type TestModel } from "@shared/testModel";
 import type { AutomationMapping, WriteOutcome, RecorderBrowser } from "@shared/ipcApi";
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, newStep } from "@/components/StepEditor";
+import { parseInstructionsToSteps } from "@shared/naturalLanguageSteps";
 import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EXECUTION_BROWSER_OPTIONS } from "@/lib/browserOptions";
+import { FAILURE_CLASSIFICATION_EXPLANATIONS } from "@/components/charts/colors";
+
+// @monaco-editor/react defaults to AMD-loading Monaco's core scripts from a
+// CDN (cdn.jsdelivr.net) at runtime — blocked outright by this app's CSP
+// (script-src 'self'), which the Studio has no reason to weaken just for
+// this. Pointing the loader at the monaco-editor package already bundled
+// into the app instead means it never touches the network at all. Runs
+// once at module load, before the Editor component below ever mounts.
+monacoLoader.config({ monaco });
 
 export default function TestEditorPage() {
   const { testCaseId } = useParams();
@@ -31,11 +49,25 @@ export default function TestEditorPage() {
 
   const [mapping, setMapping] = useState<AutomationMapping | null>(null);
   const [codeView, setCodeView] = useState<{ path: string; content: string } | null>(null);
+  const [codeViewError, setCodeViewError] = useState<string | null>(null);
 
   const [browser, setBrowser] = useState<RecorderBrowser>("chrome");
   const [mode, setMode] = useState<"headed" | "headless">("headless");
-  const [runResult, setRunResult] = useState<string | null>(null);
+  const [runResult, setRunResult] = useState<{
+    status: string;
+    passed: number;
+    total: number;
+    failedStepIndex?: number;
+    failedStepDescription?: string;
+    failureClassification?: string;
+  } | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  const [showNlBuilder, setShowNlBuilder] = useState(false);
+  const [nlText, setNlText] = useState("");
+  const [nlWarnings, setNlWarnings] = useState<string[]>([]);
+  const [nlAddedCount, setNlAddedCount] = useState<number | null>(null);
 
   useEffect(() => {
     if (!testCaseId) return;
@@ -76,6 +108,15 @@ export default function TestEditorPage() {
   }
   function addStep(type: string) {
     setModel((m) => (m ? { ...m, steps: [...m.steps, newStep(type)] } : m));
+  }
+  function handleParseInstructions() {
+    const { steps, warnings } = parseInstructionsToSteps(nlText);
+    if (steps.length > 0) {
+      setModel((m) => (m ? { ...m, steps: [...m.steps, ...steps] } : m));
+    }
+    setNlWarnings(warnings);
+    setNlAddedCount(steps.length);
+    if (warnings.length === 0) setNlText("");
   }
   function toggleTag(tag: string) {
     setModel((m) => {
@@ -121,18 +162,39 @@ export default function TestEditorPage() {
     setGenResult(res.data);
     const mappingRes = await window.studio.codegen.getMapping(testCaseId);
     if (mappingRes.ok) setMapping(mappingRes.data);
+    // Refresh whichever file is currently shown (or the main test file, if
+    // none is open yet) so the viewer reflects what was just written —
+    // the auto-open effect below only re-runs when the generated file's
+    // *path* changes, so regenerating the same file again (the common
+    // case — editing steps, then clicking "Regenerate Code") would
+    // otherwise leave a stale or empty view.
+    const pathToShow = codeView?.path ?? (mappingRes.ok ? mappingRes.data?.generatedTestFile : undefined);
+    if (pathToShow) void openCodeFile(pathToShow);
   }
 
   async function openCodeFile(relativePath: string) {
     if (!currentProject) return;
+    setCodeView(null);
+    setCodeViewError(null);
     const res = await window.studio.codegen.readFile(currentProject.id, relativePath);
-    if (res.ok) setCodeView({ path: relativePath, content: res.data.content });
+    if (res.ok) {
+      setCodeView({ path: relativePath, content: res.data.content });
+    } else {
+      // Previously failed silently — the viewer just stayed empty with no
+      // indication why, which is indistinguishable from "the code
+      // generator doesn't show the code" from the outside. The most common
+      // real cause is the file having been moved/deleted on disk since it
+      // was generated (e.g. the project directory changed), which
+      // "Regenerate Code" fixes by writing it back.
+      setCodeViewError(`Couldn't open ${relativePath}: ${res.error}`);
+    }
   }
 
   async function handleRun() {
     if (!testCaseId || !currentEnvironmentId) return;
     setIsRunning(true);
     setRunResult(null);
+    setRunError(null);
     const res = await window.studio.execution.run({
       projectId: currentProject!.id,
       environmentId: currentEnvironmentId,
@@ -143,11 +205,22 @@ export default function TestEditorPage() {
     });
     setIsRunning(false);
     if (!res.ok) {
-      setRunResult(`Error: ${res.error}`);
+      setRunError(res.error);
       return;
     }
-    const r = res.data.result as { status: string; tests: { status: string }[] };
-    setRunResult(`Status: ${r.status} (${r.tests.filter((t) => t.status === "passed").length}/${r.tests.length} passed)`);
+    const r = res.data.result as {
+      status: string;
+      tests: { status: string; failedStepIndex?: number; failedStepDescription?: string; failureClassification?: string }[];
+    };
+    const failedTest = r.tests.find((t) => t.status !== "passed");
+    setRunResult({
+      status: r.status,
+      passed: r.tests.filter((t) => t.status === "passed").length,
+      total: r.tests.length,
+      failedStepIndex: failedTest?.failedStepIndex,
+      failedStepDescription: failedTest?.failedStepDescription,
+      failureClassification: failedTest?.failureClassification,
+    });
   }
 
   const customTags = useMemo(() => model?.tags.filter((t) => !BUILT_IN_TAGS.includes(t)) ?? [], [model]);
@@ -215,6 +288,9 @@ export default function TestEditorPage() {
         <div className="row">
           <h3 style={{ margin: 0 }}>Steps</h3>
           <div className="spacer" />
+          <button className="ghost" onClick={() => setShowNlBuilder((v) => !v)}>
+            {showNlBuilder ? "Hide" : "✍️ Describe steps in plain English"}
+          </button>
           <select aria-label="Add step" onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
             <option value="" disabled>
               + Add step…
@@ -226,6 +302,51 @@ export default function TestEditorPage() {
             ))}
           </select>
         </div>
+
+        {showNlBuilder && (
+          <div className="stack" style={{ marginTop: 12, padding: 12, background: "#f6f6fd", borderRadius: 8 }}>
+            <p className="muted" style={{ margin: 0, fontSize: 12.5 }}>
+              One action per line — e.g. <span className="mono">Go to https://example.com</span>,{" "}
+              <span className="mono">Click on the Login button</span>,{" "}
+              <span className="mono">Fill Username with John</span>,{" "}
+              <span className="mono">Add random value in Health Plan Name</span>. Each line becomes a step below,
+              which you can review and adjust before saving — the locator it guesses from the wording is a first
+              draft, not exact.
+            </p>
+            <textarea
+              aria-label="Plain-English test steps"
+              value={nlText}
+              onChange={(e) => setNlText(e.target.value)}
+              rows={6}
+              placeholder={"Go to https://example.com\nClick on the Login button\nFill Username with John\nAdd random value in Health Plan Name"}
+              style={{ fontFamily: "monospace", fontSize: 13 }}
+            />
+            <div className="row">
+              <button className="primary" onClick={handleParseInstructions} disabled={!nlText.trim()}>
+                Parse &amp; Add Steps
+              </button>
+              {nlAddedCount !== null && nlWarnings.length === 0 && (
+                <span className="muted">
+                  Added {nlAddedCount} step{nlAddedCount === 1 ? "" : "s"}.
+                </span>
+              )}
+            </div>
+            {nlWarnings.length > 0 && (
+              <div className="error-banner stack">
+                <strong>
+                  {nlAddedCount ? `Added ${nlAddedCount} step(s); ` : ""}
+                  {nlWarnings.length} line{nlWarnings.length === 1 ? "" : "s"} couldn't be understood:
+                </strong>
+                {nlWarnings.map((w) => (
+                  <span key={w} className="mono" style={{ fontSize: 12 }}>
+                    {w}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="step-list" style={{ marginTop: 12 }}>
           {model.steps.map((step, idx) => (
             <StepRow
@@ -302,6 +423,12 @@ export default function TestEditorPage() {
             )}
           </div>
         )}
+        {codeViewError && (
+          <div className="error-banner stack" style={{ marginTop: 12 }}>
+            <strong>{codeViewError}</strong>
+            <span>If the project's files were moved, deleted, or the project directory changed, click "Regenerate Code" above to write them back.</span>
+          </div>
+        )}
         {codeView && (
           <div style={{ marginTop: 12, border: "1px solid var(--color-border)", borderRadius: 10, overflow: "hidden" }}>
             <div className="mono row" style={{ padding: "8px 12px", background: "#f6f6fd", fontSize: 12 }}>
@@ -342,7 +469,30 @@ export default function TestEditorPage() {
           </button>
         </div>
         {!mapping && <p className="muted" style={{ fontSize: 12.5 }}>Generate code before running.</p>}
-        {runResult && <p className="mono">{runResult}</p>}
+        {runError && <div className="error-banner">{runError}</div>}
+        {runResult && (
+          <div className="stack" style={{ gap: 4 }}>
+            <p className="mono" style={{ margin: 0 }}>
+              Status: {runResult.status} ({runResult.passed}/{runResult.total} passed)
+            </p>
+            {runResult.failedStepIndex != null && (
+              <p style={{ margin: 0, fontWeight: 600 }}>
+                Failed at Step {runResult.failedStepIndex}
+                {runResult.failedStepDescription ? (
+                  <>
+                    : <span className="mono" style={{ fontWeight: 400 }}>{runResult.failedStepDescription}</span>
+                  </>
+                ) : null}
+              </p>
+            )}
+            {runResult.failureClassification && (
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                {FAILURE_CLASSIFICATION_EXPLANATIONS[runResult.failureClassification] ?? ""}{" "}
+                <Link to="/reports">See full details in Execution History →</Link>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

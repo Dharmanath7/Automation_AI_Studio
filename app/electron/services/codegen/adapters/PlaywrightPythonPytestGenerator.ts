@@ -99,6 +99,21 @@ function renderAssertion(assertion: Assertion, locatorExpr: string | null, warni
   }
 }
 
+/**
+ * A one-line, self-contained description of a step for the "# STEP n: ..."
+ * comment emitted before its generated code (see the marker comment below)
+ * — self-contained so a failed run can be traced back to a plain-language
+ * description of which recorded/manual action broke just by reading the
+ * generated source at the traceback's line number, without needing to look
+ * anything back up against the (possibly since-edited) Test Model.
+ */
+function describeStepForMarker(step: TestStep): string {
+  const target = step.target?.preferred;
+  if (!target) return step.type;
+  const label = target.roleName ?? target.value;
+  return `${step.type} "${label}" (${target.strategy})`;
+}
+
 const STEP_ACTION_PY: Record<string, (locatorExpr: string, valueExpr: string) => string> = {
   click: (l) => `${l}.click()`,
   doubleClick: (l) => `${l}.dblclick()`,
@@ -200,6 +215,12 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
     }
 
     const groups = groupSteps(enabledSteps);
+    // 1-based position in the overall (enabled) step list — used to number
+    // the "# STEP n: ..." marker comment emitted before each step's code,
+    // so a failure's traceback line number can be traced back to plainly
+    // which step it was without needing the Test Model at all.
+    const globalStepIndexById = new Map<string, number>();
+    enabledSteps.forEach((s, i) => globalStepIndexById.set(s.id, i + 1));
     // A method name that collides with a locator attribute name (both are
     // just class attributes to Python) would have the instance attribute
     // set in __init__ silently shadow the method forever after, turning
@@ -243,6 +264,7 @@ export const PlaywrightPythonPytestGenerator: CodeGeneratorAdapter = {
       const smartWait = () => body.push('self.page.wait_for_load_state("domcontentloaded")');
 
       for (const step of group) {
+        body.push(`# STEP ${globalStepIndexById.get(step.id) ?? "?"}: ${describeStepForMarker(step)}`);
         if (step.type === "navigate") {
           body.push(`self.page.goto(${renderValueExpr(step.value)})`);
           smartWait();

@@ -92,6 +92,15 @@ const api: StudioApi = {
     requestStop: (recordingId) => invokePublic("recorderToolbar:requestStop", { recordingId }),
     insertRandomValue: (recordingId) => invokePublic("recorderToolbar:insertRandomValue", { recordingId }),
   },
+  preview: {
+    start: (steps, env, browser) => invoke("preview:start", { steps, env, browser }),
+    stop: (previewId) => invoke("preview:stop", { previewId }),
+    onEvent: (cb) => {
+      const listener = (_evt: unknown, event: unknown) => cb(event as never);
+      ipcRenderer.on("preview:event", listener);
+      return () => ipcRenderer.removeListener("preview:event", listener);
+    },
+  },
   analytics: {
     dashboard: (projectId) => invoke("analytics:dashboard", { projectId }),
   },

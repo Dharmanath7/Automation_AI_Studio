@@ -155,3 +155,11 @@ export const recorderStopSchema = z.object({ ...sessionField, recordingId: z.str
 // No sessionField — the recorder toolbar's companion window is unauthenticated
 // by design; see the comment on its IPC handlers in registerIpc.ts.
 export const recorderToolbarActionSchema = z.object({ recordingId: z.string().min(1) });
+
+export const previewStartSchema = z.object({
+  ...sessionField,
+  steps: z.array(testStepSchema),
+  env: z.object({ base_url: z.string() }).passthrough(),
+  browser: z.enum(["chrome", "chromium", "firefox", "edge"]),
+});
+export const previewStopSchema = z.object({ ...sessionField, previewId: z.string().min(1) });

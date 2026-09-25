@@ -35,6 +35,11 @@ describe("parseInstructionsToSteps", () => {
       const { steps } = parseInstructionsToSteps("Go to www.example.com");
       expect(steps[0].value).toEqual({ kind: "literal", value: "https://www.example.com" });
     });
+
+    it("regression: also normalizes a bare domain with no 'www.' prefix (e.g. 'google.com') — Playwright's page.goto() rejects a protocol-less string outright ('Cannot navigate to invalid URL'), caught live with 'Go to google.com'", () => {
+      const { steps } = parseInstructionsToSteps("Go to google.com");
+      expect(steps[0].value).toEqual({ kind: "literal", value: "https://google.com" });
+    });
   });
 
   describe("click / doubleClick", () => {
@@ -63,13 +68,13 @@ describe("parseInstructionsToSteps", () => {
   });
 
   describe("fill", () => {
-    it("parses 'Fill X with Y'", () => {
+    it("parses 'Fill X with Y', locating the target by label — get_by_text() would find the <label> element itself, which isn't fillable, so a fill target's fallback strategy is 'label', not 'text' (only click-like targets default to 'text')", () => {
       const { steps } = parseInstructionsToSteps("Fill Username with John");
       expect(steps[0]).toMatchObject({
         type: "fill",
         value: { kind: "literal", value: "John" },
       });
-      expect(steps[0].target?.preferred.strategy).toBe("text");
+      expect(steps[0].target?.preferred.strategy).toBe("label");
       expect(steps[0].target?.preferred.value).toBe("Username");
     });
 
@@ -184,5 +189,68 @@ describe("parseInstructionsToSteps", () => {
     const { steps } = parseInstructionsToSteps("Click on Login\nClick on Submit");
     expect(steps[0].id).not.toBe(steps[1].id);
     expect(steps.every((s) => s.enabled)).toBe(true);
+  });
+
+  describe("regression: the exact real-world flow reported as failing", () => {
+    const REAL_FLOW = [
+      "Go to https://go.tst-phynd.com/Account/Login",
+      'Enter the username as "DharmaPhynd"',
+      "Click on Next",
+      'Password as "Ubisoft@12"',
+      "Hover on the HealthPlan section",
+      "Click on Manage Healtplan",
+      "Wait till the Grid loads",
+      "Click on the ADD HEALTH PLAN",
+      "Add a Random healthplan Name",
+      "Add the same Healthplan external code under EXTERNAL CODE field",
+      "Click on ADD button",
+      "Wait till the Healthplan saves",
+    ].join("\n");
+
+    it("parses all 12 lines with zero warnings", () => {
+      const { steps, warnings } = parseInstructionsToSteps(REAL_FLOW);
+      expect(warnings).toEqual([]);
+      expect(steps).toHaveLength(12);
+      expect(steps.map((s) => s.type)).toEqual([
+        "navigate", "fill", "click", "fill", "hover", "click",
+        "assert", "click", "fill", "fill", "click", "assert",
+      ]);
+    });
+
+    it("'Enter the username as X' fills a literal value located by label", () => {
+      const { steps } = parseInstructionsToSteps('Enter the username as "DharmaPhynd"');
+      expect(steps[0]).toMatchObject({ type: "fill", value: { kind: "literal", value: "DharmaPhynd" } });
+      expect(steps[0].target?.preferred).toMatchObject({ strategy: "label", value: "username" });
+    });
+
+    it("'Password as X' (no leading verb) uses the Credential Vault, not the typed literal — a real password should never end up as plain text in the Test Model", () => {
+      const { steps } = parseInstructionsToSteps('Password as "Ubisoft@12"');
+      expect(steps[0]).toMatchObject({ type: "fill", value: { kind: "variable", path: "credentials.default.password" } });
+      expect(steps[0].value).not.toMatchObject({ value: "Ubisoft@12" });
+      expect(steps[0].note).toMatch(/credential vault/i);
+    });
+
+    it("'Wait till X loads/saves' becomes a visibility assertion on X — the app already waits automatically before every action, so this documents the expected checkpoint rather than generating a no-op 'wait' step", () => {
+      const a = parseInstructionsToSteps("Wait till the Grid loads").steps[0];
+      expect(a).toMatchObject({ type: "assert", assertion: { type: "visible" } });
+      expect(a.target?.preferred.value).toBe("Grid");
+
+      const b = parseInstructionsToSteps("Wait till the Healthplan saves").steps[0];
+      expect(b).toMatchObject({ type: "assert", assertion: { type: "visible" } });
+      expect(b.target?.preferred.value).toBe("Healthplan");
+    });
+
+    it("'Add a Random <field>' (no in/into/to/for connector) is recognized as a random fill", () => {
+      const { steps } = parseInstructionsToSteps("Add a Random healthplan Name");
+      expect(steps[0]).toMatchObject({ type: "fill", value: { kind: "random", generator: "randomString", seedOnce: false } });
+      expect(steps[0].target?.preferred.value).toBe("healthplan Name");
+    });
+
+    it("'Add the same X under Y field' is treated as a random fill on Y, with a note explaining the Test Model can't exactly link it to a prior step's value", () => {
+      const { steps } = parseInstructionsToSteps("Add the same Healthplan external code under EXTERNAL CODE field");
+      expect(steps[0]).toMatchObject({ type: "fill", value: { kind: "random", generator: "randomString", seedOnce: false } });
+      expect(steps[0].target?.preferred.value).toBe("EXTERNAL CODE");
+      expect(steps[0].note).toMatch(/random value/i);
+    });
   });
 });

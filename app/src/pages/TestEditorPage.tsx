@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Editor, { loader as monacoLoader } from "@monaco-editor/react";
 // The bare "monaco-editor" package barrel pulls in every bundled language
@@ -69,6 +69,13 @@ export default function TestEditorPage() {
   const [nlWarnings, setNlWarnings] = useState<string[]>([]);
   const [nlAddedCount, setNlAddedCount] = useState<number | null>(null);
 
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  const [previewResults, setPreviewResults] = useState<
+    Record<string, { status: "running" | "passed" | "failed" | "skipped"; message?: string; matchedStrategy?: string }>
+  >({});
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const previewIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!testCaseId) return;
     void window.studio.testCases.get(testCaseId).then((r) => {
@@ -78,6 +85,23 @@ export default function TestEditorPage() {
       if (r.ok) setMapping(r.data);
     });
   }, [testCaseId]);
+
+  useEffect(() => {
+    const unsubscribe = window.studio.preview.onEvent((event) => {
+      if (event.type === "stepStart") {
+        setPreviewResults((prev) => ({ ...prev, [event.stepId]: { status: "running" } }));
+      } else if (event.type === "stepResult") {
+        setPreviewResults((prev) => ({
+          ...prev,
+          [event.stepId]: { status: event.status, message: event.message, matchedStrategy: event.matchedStrategy },
+        }));
+      } else if (event.type === "finished" || event.type === "closed") {
+        previewIdRef.current = null;
+        setPreviewId(null);
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // If this test already has generated code, show it immediately rather
   // than making the user click "Generate Code" again just to see what was
@@ -223,6 +247,27 @@ export default function TestEditorPage() {
     });
   }
 
+  async function handleTryIt() {
+    if (!model || !environment) return;
+    setPreviewError(null);
+    setPreviewResults({});
+    const res = await window.studio.preview.start(model.steps, { base_url: environment.baseUrl }, browser);
+    if (!res.ok) {
+      setPreviewError(res.error);
+      return;
+    }
+    previewIdRef.current = res.data.previewId;
+    setPreviewId(res.data.previewId);
+  }
+
+  async function handleStopPreview() {
+    const id = previewIdRef.current;
+    if (!id) return;
+    await window.studio.preview.stop(id);
+    previewIdRef.current = null;
+    setPreviewId(null);
+  }
+
   const customTags = useMemo(() => model?.tags.filter((t) => !BUILT_IN_TAGS.includes(t)) ?? [], [model]);
 
   if (!model) return <p className="muted">Loading…</p>;
@@ -291,6 +336,20 @@ export default function TestEditorPage() {
           <button className="ghost" onClick={() => setShowNlBuilder((v) => !v)}>
             {showNlBuilder ? "Hide" : "✍️ Describe steps in plain English"}
           </button>
+          {previewId ? (
+            <button className="ghost danger" onClick={() => void handleStopPreview()}>
+              ⏹ Stop Preview
+            </button>
+          ) : (
+            <button
+              className="ghost"
+              onClick={() => void handleTryIt()}
+              disabled={!environment || model.steps.length === 0}
+              title={!environment ? "Select an environment first" : "Opens a real browser window and runs these steps live"}
+            >
+              ▶ Try It in a Browser
+            </button>
+          )}
           <select aria-label="Add step" onChange={(e) => e.target.value && (addStep(e.target.value), (e.target.value = ""))} defaultValue="">
             <option value="" disabled>
               + Add step…
@@ -344,6 +403,30 @@ export default function TestEditorPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {previewError && <div className="error-banner" style={{ marginTop: 12 }}>{previewError}</div>}
+        {(previewId || Object.keys(previewResults).length > 0) && (
+          <div className="stack" style={{ marginTop: 12, padding: 12, background: "#f6f6fd", borderRadius: 8, gap: 4 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <strong style={{ fontSize: 13 }}>{previewId ? "Running in browser…" : "Preview finished"}</strong>
+            </div>
+            {model.steps.map((step, idx) => {
+              const r = previewResults[step.id];
+              if (!r) return null;
+              const icon = r.status === "running" ? "⏳" : r.status === "passed" ? "✅" : r.status === "skipped" ? "⏭️" : "❌";
+              return (
+                <div key={step.id} className="row" style={{ gap: 8, fontSize: 12.5 }}>
+                  <span>{icon}</span>
+                  <span className="mono muted">
+                    Step {idx + 1} — {step.type}
+                  </span>
+                  {r.matchedStrategy && <span className="muted">matched {r.matchedStrategy}</span>}
+                  {r.message && <span className={r.status === "failed" ? "" : "muted"}>{r.message}</span>}
+                </div>
+              );
+            })}
           </div>
         )}
 

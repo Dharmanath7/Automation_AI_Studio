@@ -19,9 +19,10 @@ import { writeGeneratedCode, getAutomationMapping, readProjectFile } from "../se
 import { runExecution, listExecutions, getExecution } from "../services/execution/executionService";
 import { checkAndCacheRuntime, getLastRuntimeCheck } from "../services/runtimeService";
 import { startRecording, stopRecording, insertRandomValue } from "../services/recorder/recorderService";
+import { startPreview, stopPreview } from "../services/preview/previewService";
 import { getDashboardAnalytics } from "../services/analyticsService";
 import { getLogger } from "../services/logger";
-import type { TestModel } from "../shared/testModel";
+import type { TestModel, TestStep } from "../shared/testModel";
 import * as schemas from "./schemas";
 
 const logger = getLogger("db");
@@ -288,6 +289,21 @@ export function registerIpcHandlers(mainWindow: BrowserWindow): void {
   handlePublic("recorderToolbar:insertRandomValue", schemas.recorderToolbarActionSchema, async ({ recordingId }) =>
     insertRandomValue(recordingId)
   );
+
+  // ---- "Try It in a Browser" step preview -----------------------------------
+  handleAuthed("preview:start", schemas.previewStartSchema, async ({ steps, env, browser }) => {
+    const previewId = await startPreview({
+      steps: steps as TestStep[],
+      env: env as { base_url: string; [key: string]: string | undefined },
+      browser,
+      onEvent: (event) => mainWindow.webContents.send("preview:event", event),
+    });
+    return { previewId };
+  });
+  handleAuthed("preview:stop", schemas.previewStopSchema, async ({ previewId }) => {
+    await stopPreview(previewId);
+    return { stopped: true };
+  });
 
   // ---- Native dialogs ---------------------------------------------------
   handleAuthed("dialog:selectDirectory", schemas.authMeSchema, async () => {

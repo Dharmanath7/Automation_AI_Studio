@@ -4,7 +4,7 @@ import pino from "pino";
 
 export type LogArea =
   | "auth" | "db" | "projects" | "recorder" | "browser" | "codegen"
-  | "execution" | "reporting" | "git" | "runtime";
+  | "execution" | "reporting" | "git" | "runtime" | "preview";
 
 const REDACT_PATHS = [
   "password", "*.password", "secret", "*.secret", "token", "*.token",

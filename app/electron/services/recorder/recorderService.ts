@@ -116,12 +116,17 @@ function primaryWorkArea(): { width: number; height: number } {
   return { width, height };
 }
 
-async function launchBrowser(opts: StartRecordingOptions): Promise<Browser> {
+/**
+ * Shared by the recorder and the Test Editor's "Try It in a Browser"
+ * preview (previewService.ts) — anywhere the Studio needs a real, visible
+ * browser window pointed at whatever engine the person picked.
+ */
+export async function launchBrowser(browserChoice: RecorderBrowser): Promise<Browser> {
   const debugPort = process.env.AAS_RECORDER_DEBUG_PORT;
   const { width, height } = primaryWorkArea();
   const debugArgs = debugPort ? [`--remote-debugging-port=${debugPort}`] : [];
 
-  if (opts.browser === "firefox") {
+  if (browserChoice === "firefox") {
     const executablePath = resolveFirefoxExecutable();
     if (!executablePath) {
       throw new Error(
@@ -140,8 +145,8 @@ async function launchBrowser(opts: StartRecordingOptions): Promise<Browser> {
   // Chrome / Edge use the system-installed browser via Playwright's
   // "channel" mechanism — no separate download, and the most reliable path
   // since it's exactly the browser already on this machine.
-  if (opts.browser === "chrome" || opts.browser === "edge") {
-    const channel = opts.browser === "chrome" ? "chrome" : "msedge";
+  if (browserChoice === "chrome" || browserChoice === "edge") {
+    const channel = browserChoice === "chrome" ? "chrome" : "msedge";
     try {
       return await chromium.launch({
         channel,
@@ -150,7 +155,7 @@ async function launchBrowser(opts: StartRecordingOptions): Promise<Browser> {
       });
     } catch (err) {
       throw new Error(
-        opts.browser === "chrome"
+        browserChoice === "chrome"
           ? `Failed to launch Chrome: ${err instanceof Error ? err.message : String(err)}`
           : `Failed to launch Microsoft Edge: ${err instanceof Error ? err.message : String(err)}`
       );
@@ -177,7 +182,7 @@ async function launchBrowser(opts: StartRecordingOptions): Promise<Browser> {
 }
 
 export async function startRecording(opts: StartRecordingOptions): Promise<string> {
-  const browser = await launchBrowser(opts);
+  const browser = await launchBrowser(opts.browser);
 
   // viewport: null makes the page fill whatever size the OS window actually
   // is (maximized) instead of Playwright emulating a fixed small viewport

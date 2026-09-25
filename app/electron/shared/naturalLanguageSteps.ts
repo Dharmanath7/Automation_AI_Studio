@@ -29,7 +29,18 @@ const GO_BACK_RE = /^go\s*back$/i;
 const GO_FORWARD_RE = /^go\s*forward$/i;
 const REFRESH_RE = /^(?:refresh|reload)(?:\s+the\s+page)?$/i;
 const NAVIGATE_RE = /^(?:go\s*to|navigate\s*to|open|visit)\s+(.+)$/i;
+const WAIT_RE =
+  /^wait\s+(?:till|until)\s+(?:the\s+)?(.+?)\s+(?:loads?|appears?|is\s+(?:visible|shown|displayed)|saves?|completes?|finishes?|updates?|renders?|opens?|closes?|disappears?)$/i;
 const ADD_RANDOM_RE = /^add\s+(?:an?\s+)?random\s*(?:value|text|data|string)?\s+(?:in|into|to|for)\s+(.+)$/i;
+// "Add a Random healthplan Name" — the field name follows "random" directly,
+// with no in/into/to/for connector word at all.
+const ADD_RANDOM_INLINE_RE = /^add\s+(?:an?\s+)?random\s+(.+)$/i;
+// "Add the same Healthplan external code under EXTERNAL CODE field" — refers
+// back to a previously generated value, which the Test Model has no way to
+// represent (no "same as step N" value kind) — treated as its own random
+// value with a note explaining the substitution, rather than silently
+// guessing at an exact link that can't actually be made.
+const SAME_VALUE_UNDER_FIELD_RE = /\bsame\b.*\bunder\s+(?:the\s+)?(.+?)\s+field\b/i;
 const DOUBLE_CLICK_RE = /^double[\s-]?click\s*(?:on\s+)?(.+)$/i;
 const CLICK_RE = /^(?:click|press|tap)\s*(?:on\s+)?(.+)$/i;
 const HOVER_RE = /^hover\s*(?:on|over)?\s+(.+)$/i;
@@ -37,8 +48,16 @@ const UNCHECK_RE = /^uncheck\s+(.+)$/i;
 const CHECK_RE = /^(?:check|tick)\s+(.+)$/i;
 const FILL_WITH_RE = /^(?:fill|set)\s+(.+?)\s+(?:with|to)\s+(.+)$/i;
 const ENTER_INTO_RE = /^(?:enter|type)\s+(.+?)\s+(?:in|into)\s+(.+)$/i;
+// "Enter the username as X" — same idea as ENTER_INTO_RE but with "as"
+// instead of "in"/"into", and the target/value order matching FILL_WITH_RE
+// (target first).
+const ENTER_AS_RE = /^enter\s+(?:the\s+)?(.+?)\s+as\s+(.+)$/i;
 const SELECT_RE = /^(?:select|choose)\s+(.+?)\s+(?:from|in)\s+(.+)$/i;
 const VERIFY_VISIBLE_RE = /^(?:verify|assert|check)\s+(?:that\s+)?(.+?)\s+(?:is|are)\s+(?:visible|shown|displayed)$/i;
+// Last-resort fallback, checked only after every explicit-verb pattern above
+// has failed to match: "Password as X" / "<Field> as X" with no leading verb
+// at all — a common shorthand for "fill this field with this value".
+const IMPLICIT_FILL_AS_RE = /^(.+?)\s+as\s+(.+)$/i;
 
 function makeStep(type: StepType, extra: Partial<TestStep> = {}): TestStep {
   return { id: uuidv4(), type, enabled: true, ...extra };
@@ -50,7 +69,7 @@ function randomValue(): TestValue {
 
 function stripQuotes(s: string): string {
   const trimmed = s.trim();
-  const m = trimmed.match(/^["'](.*)["']$/);
+  const m = trimmed.match(/^["'“](.*)["'”]$/);
   return m ? m[1] : trimmed;
 }
 
@@ -61,18 +80,27 @@ function isUrlLike(s: string): boolean {
 function normalizeUrl(s: string): string {
   const trimmed = stripQuotes(s);
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  if (/^www\./i.test(trimmed)) return `https://${trimmed}`;
-  return trimmed;
+  // Anything isUrlLike() judged a domain (e.g. "google.com", not just the
+  // "www."-prefixed case) needs an explicit protocol — Playwright's
+  // page.goto() rejects a bare domain string outright ("Cannot navigate to
+  // invalid URL") rather than assuming https, unlike a browser's address
+  // bar. Caught live: "Go to google.com" failed this way even though
+  // isUrlLike() correctly recognized it as a URL.
+  return `https://${trimmed}`;
 }
 
 /**
  * Guesses a locator from a target phrase like "the Login button" or
  * "Username field" — an explicit role word at the end (button/link/
  * checkbox/dropdown/field/...) becomes a role-based locator with that word
- * stripped from the name; otherwise falls back to matching by visible text,
- * which reasonably covers buttons/links named directly ("Click Submit").
+ * stripped from the name; otherwise falls back to matching by visible text
+ * for click-like actions (buttons/links are usually named by their visible
+ * text) or by label for fill-like ones — get_by_text("Username") would
+ * actually resolve to the <label> element itself (which can't be filled),
+ * not the input it labels, whereas get_by_label() correctly finds the
+ * associated input.
  */
-function inferTarget(rawPhrase: string): StepTarget {
+function inferTarget(rawPhrase: string, kind: "fill" | "click" = "click"): StepTarget {
   const phrase = stripQuotes(rawPhrase).replace(/^(the|a|an)\s+/i, "").trim();
 
   const roleSuffixes: { re: RegExp; role: string }[] = [
@@ -94,7 +122,37 @@ function inferTarget(rawPhrase: string): StepTarget {
     }
   }
 
+  if (kind === "fill") {
+    return {
+      preferred: { strategy: "label", value: phrase, quality: "fair" },
+      alternatives: [
+        { strategy: "placeholder", value: phrase, quality: "fragile" },
+        { strategy: "text", value: phrase, quality: "fragile" },
+      ],
+    };
+  }
   return { preferred: { strategy: "text", value: phrase, quality: "fragile" }, alternatives: [] };
+}
+
+/**
+ * A fill step whose target phrase mentions "password" uses the Credential
+ * Vault instead of the literal value typed in the instructions — the same
+ * rule the recorder itself follows (see pageScript.ts/recorderService.ts):
+ * a real password should never end up as plain text in the Test Model,
+ * even if it was only ever typed into this plain-English box locally. The
+ * originally-typed value is discarded (not persisted anywhere) and a note
+ * on the step explains the substitution so it isn't a silent surprise.
+ */
+function buildFillStep(targetPhrase: string, literalRaw: string): TestStep {
+  const target = inferTarget(targetPhrase, "fill");
+  if (/\bpassword\b/i.test(targetPhrase)) {
+    return makeStep("fill", {
+      target,
+      value: { kind: "variable", path: "credentials.default.password" },
+      note: "Password field — using the Credential Vault instead of the typed value, for security (see Environments & Credentials).",
+    });
+  }
+  return makeStep("fill", { target, value: { kind: "literal", value: stripQuotes(literalRaw) } });
 }
 
 /**
@@ -135,26 +193,45 @@ function parseLine(rawLine: string, lineNumber: number): { step?: TestStep; warn
     return { step: makeStep("navigate", { value }) };
   }
 
+  // "Wait till X loads/saves/..." — this app already waits automatically
+  // (Smart Waits) before every action, so there's no separate "wait" step
+  // type to generate; the closest useful translation is a visibility
+  // assertion on the named element, which both documents the expected state
+  // at that point in the flow and gives Playwright's own auto-retrying
+  // expect() something concrete to wait on.
+  if ((m = line.match(WAIT_RE))) {
+    return { step: makeStep("assert", { target: inferTarget(m[1]), assertion: { type: "visible" } }) };
+  }
+
   // Random-value fills are checked before the generic fill/enter patterns
   // so "Fill Health Plan with a random value" is recognized as a random
   // fill, not a literal fill whose value happens to be the words "a random
   // value".
   if ((m = line.match(ADD_RANDOM_RE))) {
-    return { step: makeStep("fill", { target: inferTarget(m[1]), value: randomValue() }) };
+    return { step: makeStep("fill", { target: inferTarget(m[1], "fill"), value: randomValue() }) };
+  }
+  if ((m = line.match(ADD_RANDOM_INLINE_RE))) {
+    return { step: makeStep("fill", { target: inferTarget(m[1], "fill"), value: randomValue() }) };
+  }
+  if ((m = line.match(SAME_VALUE_UNDER_FIELD_RE))) {
+    return {
+      step: makeStep("fill", {
+        target: inferTarget(m[1], "fill"),
+        value: randomValue(),
+        note: 'Interpreted "the same ... value" as a new random value — the Test Model has no way to exactly reuse a previous step\'s generated value. If this field must match another step exactly, change its Value Source to Variable and reference that step\'s value by hand.',
+      }),
+    };
   }
   if (RANDOM_VALUE_WORD_RE.test(line)) {
     const targetPhrase = extractTargetForRandomValue(line);
-    if (targetPhrase) return { step: makeStep("fill", { target: inferTarget(targetPhrase), value: randomValue() }) };
+    if (targetPhrase) return { step: makeStep("fill", { target: inferTarget(targetPhrase, "fill"), value: randomValue() }) };
   }
 
-  if ((m = line.match(FILL_WITH_RE))) {
-    return { step: makeStep("fill", { target: inferTarget(m[1]), value: { kind: "literal", value: stripQuotes(m[2]) } }) };
-  }
-  if ((m = line.match(ENTER_INTO_RE))) {
-    return { step: makeStep("fill", { target: inferTarget(m[2]), value: { kind: "literal", value: stripQuotes(m[1]) } }) };
-  }
+  if ((m = line.match(FILL_WITH_RE))) return { step: buildFillStep(m[1], m[2]) };
+  if ((m = line.match(ENTER_INTO_RE))) return { step: buildFillStep(m[2], m[1]) };
+  if ((m = line.match(ENTER_AS_RE))) return { step: buildFillStep(m[1], m[2]) };
   if ((m = line.match(SELECT_RE))) {
-    return { step: makeStep("select", { target: inferTarget(m[2]), value: { kind: "literal", value: stripQuotes(m[1]) } }) };
+    return { step: makeStep("select", { target: inferTarget(m[2], "fill"), value: { kind: "literal", value: stripQuotes(m[1]) } }) };
   }
   if ((m = line.match(VERIFY_VISIBLE_RE))) {
     return { step: makeStep("assert", { target: inferTarget(m[1]), assertion: { type: "visible" } }) };
@@ -177,6 +254,12 @@ function parseLine(rawLine: string, lineNumber: number): { step?: TestStep; warn
   if ((m = line.match(CLICK_RE))) {
     return { step: makeStep("click", { target: inferTarget(m[1]) }) };
   }
+
+  // Last resort: "<field> as <value>" with no leading verb at all — e.g.
+  // "Password as Ubisoft@12". Checked only once nothing more specific above
+  // has matched, since "X as Y" on its own is a much weaker signal than any
+  // of the explicit-verb patterns.
+  if ((m = line.match(IMPLICIT_FILL_AS_RE))) return { step: buildFillStep(m[1], m[2]) };
 
   return { warning: `Line ${lineNumber}: couldn't understand "${rawLine.trim()}" — add it manually with "+ Add step…" below.` };
 }

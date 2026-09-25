@@ -14,6 +14,7 @@ import type { DashboardAnalytics } from "../services/analyticsService";
 import type { WriteOutcome, AutomationMapping } from "../services/codegen/generationService";
 import type { RunRequest, ExecutionSummary, ExecutionDetail } from "../services/execution/executionService";
 import type { ExecutionEvent, RuntimeCheckResult } from "../services/execution/ExecutionAdapter";
+import type { PreviewEvent, PreviewEnv } from "../services/preview/previewService";
 
 export type Envelope<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -103,6 +104,12 @@ export interface StudioApi {
   recorderToolbar: {
     requestStop(recordingId: string): Promise<Envelope<{ recordingId: string }>>;
     insertRandomValue(recordingId: string): Promise<Envelope<{ ok: boolean; reason?: string }>>;
+  };
+  /** "Try It in a Browser" — dry-runs a test case's steps against a real, visible browser so a guessed locator is verified rather than assumed. */
+  preview: {
+    start(steps: TestStep[], env: PreviewEnv, browser: RecorderBrowser): Promise<Envelope<{ previewId: string }>>;
+    stop(previewId: string): Promise<Envelope<{ stopped: boolean }>>;
+    onEvent(cb: (event: PreviewEvent) => void): () => void;
   };
   analytics: {
     dashboard(projectId: string): Promise<Envelope<DashboardAnalytics>>;

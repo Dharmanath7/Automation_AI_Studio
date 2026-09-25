@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, useStepList } from "@/components/StepEditor";
-import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
 import { STEP_TYPES, type TestStep } from "@shared/testModel";
 import type { RecorderBrowser } from "@shared/ipcApi";
 import { RECORDER_BROWSER_OPTIONS } from "@/lib/browserOptions";
@@ -261,8 +260,6 @@ export default function RecorderPage() {
               {steps.length === 0 && <p className="muted">No steps recorded. Go back and record, or add steps manually.</p>}
             </div>
           </div>
-
-          {currentProject && <CredentialsUsedPanel projectId={currentProject.id} environment={environment} steps={steps} />}
 
           {saveError && <div className="error-banner">{saveError}</div>}
           <div className="row">

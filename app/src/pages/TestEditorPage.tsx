@@ -14,7 +14,8 @@ import type { AutomationMapping, WriteOutcome, RecorderBrowser } from "@shared/i
 import { useProjectStore } from "@/state/projectStore";
 import { BUILT_IN_TAGS, StepRow, newStep } from "@/components/StepEditor";
 import { parseInstructionsToSteps } from "@shared/naturalLanguageSteps";
-import { CredentialsUsedPanel } from "@/components/CredentialsUsedPanel";
+import { CredentialPromptModal } from "@/components/CredentialPromptModal";
+import { collectCredentialRefs, type CredentialRef } from "@/lib/credentialRefs";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { EXECUTION_BROWSER_OPTIONS } from "@/lib/browserOptions";
 import { FAILURE_CLASSIFICATION_EXPLANATIONS } from "@/components/charts/colors";
@@ -75,6 +76,9 @@ export default function TestEditorPage() {
   >({});
   const [previewError, setPreviewError] = useState<string | null>(null);
   const previewIdRef = useRef<string | null>(null);
+
+  const [credPromptRefs, setCredPromptRefs] = useState<CredentialRef[] | null>(null);
+  const [pendingAfterCreds, setPendingAfterCreds] = useState<"run" | "tryit" | null>(null);
 
   useEffect(() => {
     if (!testCaseId) return;
@@ -214,6 +218,60 @@ export default function TestEditorPage() {
     }
   }
 
+  /** Which `credentials.*` values this test needs that don't have a value saved yet. */
+  async function getMissingCredentialRefs(): Promise<CredentialRef[]> {
+    if (!model || !currentProject) return [];
+    const refs = collectCredentialRefs(model.steps);
+    if (refs.length === 0) return [];
+    const profilesRes = await window.studio.credentials.listProfiles(currentProject.id);
+    if (!profilesRes.ok) return refs;
+
+    const fieldsCache = new Map<string, Set<string>>();
+    async function fieldsFor(profileId: string): Promise<Set<string>> {
+      const cached = fieldsCache.get(profileId);
+      if (cached) return cached;
+      const res = await window.studio.credentials.listFields(profileId);
+      const set = new Set(res.ok ? res.data.map((f) => f.key) : []);
+      fieldsCache.set(profileId, set);
+      return set;
+    }
+
+    const missing: CredentialRef[] = [];
+    for (const ref of refs) {
+      const profileId =
+        ref.profileKey === "default"
+          ? (environment?.defaultCredentialProfileId ?? undefined)
+          : profilesRes.data.find((p) => p.name.toLowerCase() === ref.profileKey.toLowerCase())?.id;
+      if (!profileId) {
+        missing.push(ref);
+        continue;
+      }
+      const fields = await fieldsFor(profileId);
+      if (!fields.has(ref.field)) missing.push(ref);
+    }
+    return missing;
+  }
+
+  async function handleRunGated() {
+    const missing = await getMissingCredentialRefs();
+    if (missing.length > 0) {
+      setCredPromptRefs(missing);
+      setPendingAfterCreds("run");
+      return;
+    }
+    await handleRun();
+  }
+
+  async function handleTryItGated() {
+    const missing = await getMissingCredentialRefs();
+    if (missing.length > 0) {
+      setCredPromptRefs(missing);
+      setPendingAfterCreds("tryit");
+      return;
+    }
+    await handleTryIt();
+  }
+
   async function handleRun() {
     if (!testCaseId || !currentEnvironmentId) return;
     setIsRunning(true);
@@ -343,7 +401,7 @@ export default function TestEditorPage() {
           ) : (
             <button
               className="ghost"
-              onClick={() => void handleTryIt()}
+              onClick={() => void handleTryItGated()}
               disabled={!environment || model.steps.length === 0}
               title={!environment ? "Select an environment first" : "Opens a real browser window and runs these steps live"}
             >
@@ -445,12 +503,23 @@ export default function TestEditorPage() {
         </div>
       </div>
 
-      {currentProject && (
-        <CredentialsUsedPanel
+      {credPromptRefs && currentProject && environment && (
+        <CredentialPromptModal
           projectId={currentProject.id}
           environment={environment}
-          steps={model.steps}
-          onEnvironmentUpdated={() => void selectProject(currentProject.id)}
+          refs={credPromptRefs}
+          onCancel={() => {
+            setCredPromptRefs(null);
+            setPendingAfterCreds(null);
+          }}
+          onReady={async () => {
+            setCredPromptRefs(null);
+            await selectProject(currentProject.id);
+            const action = pendingAfterCreds;
+            setPendingAfterCreds(null);
+            if (action === "run") await handleRun();
+            else if (action === "tryit") await handleTryIt();
+          }}
         />
       )}
 
@@ -547,7 +616,7 @@ export default function TestEditorPage() {
             </select>
           </div>
           <span className="muted">Environment: {environment?.name ?? "none selected"}</span>
-          <button className="primary" onClick={() => void handleRun()} disabled={isRunning || !currentEnvironmentId || !mapping}>
+          <button className="primary" onClick={() => void handleRunGated()} disabled={isRunning || !currentEnvironmentId || !mapping}>
             {isRunning ? "Running…" : "Run Test"}
           </button>
         </div>

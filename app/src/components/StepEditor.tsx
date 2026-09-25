@@ -13,6 +13,36 @@ import {
 } from "@shared/testModel";
 import { generateRandomValue, generateBoundaryValue } from "@shared/randomData";
 
+const RANDOM_GENERATOR_HINTS: Record<string, string> = {
+  firstName: "A random first name, e.g. \"Alex\".",
+  lastName: "A random last name, e.g. \"Nguyen\".",
+  fullName: "A random full name.",
+  email: "A random, guaranteed-unique email address.",
+  phone: "A random phone number.",
+  address: "A random street address.",
+  uuid: "A random unique ID (e.g. \"3fa1-...\") — good for fields that just need to be unique.",
+  integer: "A random whole number.",
+  decimal: "A random decimal number.",
+  alphanumeric: "A random mix of letters and numbers.",
+  randomString: "A random string of characters — the general-purpose default.",
+  date: "A random date.",
+  pastDate: "A random date in the past.",
+  futureDate: "A random date in the future.",
+  url: "A random-looking web address.",
+  customPattern: "Build your own pattern instead of picking a built-in type.",
+};
+
+const BOUNDARY_KIND_HINTS: Record<string, string> = {
+  empty: "An empty value — tests what happens when the field is left blank.",
+  whitespace: "Just spaces — tests whether the field trims or rejects whitespace-only input.",
+  oneCharacter: "A single character — the shortest possible non-empty input.",
+  maxLength: "A value exactly at the field's maximum allowed length.",
+  maxLengthPlusOne: "One character over the maximum allowed length — should be rejected if limits are enforced.",
+  specialCharacters: "Symbols and punctuation — tests handling of characters like < > & \" '.",
+  unicode: "Non-English characters and emoji — tests handling of international text.",
+  veryLongValue: "An extremely long value, well beyond any reasonable limit.",
+};
+
 /**
  * Shared visual step-editing UI — used by both the manual Test Editor
  * (editing an existing test's steps) and the Recorder review screen
@@ -241,6 +271,7 @@ export function ValueEditor({
         <select
           aria-label={label}
           value={kind}
+          title="How this value is decided when the test runs — hover each option below for details."
           onChange={(e) => {
             const newKind = e.target.value as TestValue["kind"];
             if (newKind === "literal") onChange({ kind: "literal", value: "" });
@@ -258,11 +289,34 @@ export function ValueEditor({
             else onChange({ kind: "boundary", boundary: "empty" });
           }}
         >
-          <option value="literal">Literal</option>
-          <option value="variable">Variable</option>
-          <option value="random">Random 🎲</option>
-          <option value="boundary">Boundary</option>
+          <option value="literal" title="A fixed value you type in below — used exactly as written, every time the test runs.">
+            Literal
+          </option>
+          <option
+            value="variable"
+            title="A value looked up at run time instead of typed here — e.g. the environment's base_url, or a password saved in Environments & Credentials. Lets the same test run against different environments or accounts unchanged."
+          >
+            Variable
+          </option>
+          <option
+            value="random"
+            title="A fresh, made-up value generated automatically (a name, email, number, etc.) — useful for fields that must be unique each run, like a signup email or an ID."
+          >
+            Random 🎲
+          </option>
+          <option
+            value="boundary"
+            title="An edge-case value used to test how the field handles unusual input — e.g. left empty, extremely long, or full of special characters."
+          >
+            Boundary
+          </option>
         </select>
+        <p className="muted" style={{ margin: "4px 0 0", fontSize: 11.5, maxWidth: 260 }}>
+          {kind === "literal" && "A fixed value, typed below, used as-is every run."}
+          {kind === "variable" && "Looked up at run time — an environment value or a saved credential."}
+          {kind === "random" && "A fresh, auto-generated value each run (or once, if locked)."}
+          {kind === "boundary" && "An edge-case input (empty, very long, special characters…) to stress-test the field."}
+        </p>
       </div>
 
       {value?.kind === "literal" && (
@@ -292,10 +346,11 @@ export function ValueEditor({
             <select
               aria-label="Random data generator"
               value={value.generator}
+              title="What kind of random value to generate — hover an option for details."
               onChange={(e) => onChange({ ...value, generator: e.target.value as typeof value.generator })}
             >
               {RANDOM_GENERATORS.map((g) => (
-                <option key={g} value={g}>
+                <option key={g} value={g} title={RANDOM_GENERATOR_HINTS[g]}>
                   {g}
                 </option>
               ))}
@@ -336,10 +391,11 @@ export function ValueEditor({
             <select
               aria-label="Boundary value case"
               value={value.boundary}
+              title="Which edge case to test — hover an option for details."
               onChange={(e) => onChange({ kind: "boundary", boundary: e.target.value as typeof value.boundary })}
             >
               {BOUNDARY_KINDS.map((b) => (
-                <option key={b} value={b}>
+                <option key={b} value={b} title={BOUNDARY_KIND_HINTS[b]}>
                   {b}
                 </option>
               ))}
